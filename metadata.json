@@ -1,0 +1,5 @@
+{
+  "name": "Dual Letter Time",
+  "description": "A browser-based Dual Text Illusion generator. Create 3D printable ambigrams that show different text depending on the viewing angle.",
+  "requestFramePermissions": []
+}
