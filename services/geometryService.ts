@@ -1,32 +1,46 @@
 import * as THREE from 'three';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry';
 import { FontLoader, Font } from 'three/examples/jsm/loaders/FontLoader';
+import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter';
-import { Evaluator, Brush, SUBTRACTION, ADDITION, INTERSECTION } from 'three-bvh-csg';
+import { Evaluator, Brush, ADDITION, INTERSECTION } from 'three-bvh-csg';
 import { TextSettings } from '../types';
 
 let cachedFont: Font | null = null;
-let cachedFontUrl: string | null = null;
+let cachedFontName: string | null = null;
 
 export const loadFont = async (url: string): Promise<Font> => {
-  if (cachedFont && cachedFontUrl === url) return cachedFont;
-  
-  const loader = new FontLoader();
+  if (cachedFont && cachedFontName === url) return cachedFont;
+
+  const loader = new TTFLoader();
+  const fontLoader = new FontLoader();
+
   return new Promise((resolve, reject) => {
     loader.load(
       url,
-      (font) => {
-        cachedFont = font;
-        cachedFontUrl = url;
-        resolve(font);
+      (json) => {
+        try {
+            const font = fontLoader.parse(json);
+            cachedFont = font;
+            cachedFontName = url;
+            resolve(font);
+        } catch (e) {
+            console.error("Error parsing font:", e);
+            reject(new Error(`Failed to parse font data from ${url}`));
+        }
       },
       undefined,
-      (err) => reject(err)
+      (err) => {
+          console.error("Error loading font:", err);
+          reject(new Error(`Failed to load font from ${url}. The file might be missing or blocked.`));
+      }
     );
   });
 };
 
 export const generateDualTextGeometry = async (settings: TextSettings): Promise<THREE.BufferGeometry> => {
+  if (!settings.fontUrl) throw new Error("No font selected");
+
   const font = await loadFont(settings.fontUrl);
   const { 
     text1, 
@@ -42,7 +56,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   } = settings;
 
   const length = Math.min(text1.length, text2.length);
-  // Remove uppercase enforcement to allow special characters if font supports them
   const t1 = text1.substring(0, length);
   const t2 = text2.substring(0, length);
 
@@ -120,14 +133,9 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         if (supportEnabled) {
             const maskChar = (i < supportMask.length) ? supportMask[i] : '_';
             if (maskChar !== '_' && maskChar !== ' ') {
-                // Cylinder: Radius R, Height H. 
-                // Default pivot is center.
-                // We want it sitting on Y=0 extending to Y=H.
-                // So Center Y = H/2.
-                
                 const cylGeom = new THREE.CylinderGeometry(supportRadius, supportRadius, supportHeight, 16);
                 const cylBrush = new Brush(cylGeom);
-                
+                // Center Y = supportHeight / 2 -> Bottom at 0
                 cylBrush.position.set(centerX, supportHeight / 2, 0);
                 cylBrush.updateMatrixWorld();
 
@@ -151,11 +159,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       const fullCenter = new THREE.Vector3();
       fullBBox.getCenter(fullCenter);
       
-      // We want Base Top at Y=0.
-      // Base Height = H.
-      // Base Y Range: [0, -H].
-      // Center Y = -H/2.
-      
       const baseGeom = new THREE.BoxGeometry(
           fullSize.x + basePadding, 
           baseHeight, 
@@ -177,7 +180,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   finalGeom.computeBoundingBox();
   finalGeom.computeVertexNormals();
   
-  // Center entire object at world origin
   if (finalGeom.boundingBox) {
       const center = new THREE.Vector3();
       finalGeom.boundingBox.getCenter(center);

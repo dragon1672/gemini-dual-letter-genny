@@ -18,6 +18,13 @@ export enum ViewMode {
   RESULT = 'RESULT',
 }
 
+export interface FontVariant {
+  name: string;
+  url: string;
+}
+
+export type FontLibrary = Record<string, FontVariant[]>;
+
 export interface GenerationResult {
   geometry: any; // THREE.BufferGeometry
   computeTime: number;

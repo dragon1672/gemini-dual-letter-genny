@@ -1,18 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import Controls from './components/Controls';
 import Scene from './components/Scene';
 import { TextSettings, ViewMode } from './types';
-import { DEFAULT_SETTINGS } from './constants';
-import { generateDualTextGeometry, exportToSTL } from './services/geometryService';
+import { DEFAULT_SETTINGS, getFontLibrary } from './constants';
+import { generateDualTextGeometry, exportToSTL, loadFont } from './services/geometryService';
 
 const App: React.FC = () => {
   const [settings, setSettings] = useState<TextSettings>(DEFAULT_SETTINGS);
   const [generatedGeometry, setGeneratedGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.PREVIEW);
+  
+  // Memoize font library to prevent re-parsing
+  const fontLibrary = useMemo(() => getFontLibrary(), []);
 
-  // When settings change, revert to preview mode (invalidate old geometry visually)
+  // Preload the default font
+  useEffect(() => {
+    if (settings.fontUrl) {
+        loadFont(settings.fontUrl).catch(e => console.warn("Failed to load default font", e));
+    }
+  }, []);
+
+  // When settings change, revert to preview mode
   useEffect(() => {
     if (viewMode === ViewMode.RESULT) {
        setViewMode(ViewMode.PREVIEW);
@@ -21,7 +31,6 @@ const App: React.FC = () => {
 
   const handleGenerate = async () => {
     setIsGenerating(true);
-    // Add small delay to allow UI to update to loading state before heavy calculation
     setTimeout(async () => {
         try {
             const geom = await generateDualTextGeometry(settings);
@@ -29,7 +38,7 @@ const App: React.FC = () => {
             setViewMode(ViewMode.RESULT);
         } catch (error) {
             console.error("Generation failed:", error);
-            alert("Failed to generate geometry.");
+            alert("Failed to generate geometry. The font might be corrupt or missing characters.");
         } finally {
             setIsGenerating(false);
         }
@@ -44,7 +53,6 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden">
-      {/* Sidebar Controls */}
       <Controls 
         settings={settings}
         setSettings={setSettings}
@@ -52,9 +60,9 @@ const App: React.FC = () => {
         onDownload={handleDownload}
         isGenerating={isGenerating}
         hasResult={!!generatedGeometry}
+        fontLibrary={fontLibrary}
       />
 
-      {/* 3D Scene */}
       <main className="flex-1 relative">
         <Scene 
             settings={settings}
@@ -62,7 +70,6 @@ const App: React.FC = () => {
             mode={viewMode}
         />
         
-        {/* Overlay Message if in Preview Mode */}
         {viewMode === ViewMode.PREVIEW && generatedGeometry && !isGenerating && (
             <div className="absolute top-4 left-4 bg-yellow-600/90 text-white px-4 py-2 rounded shadow-lg text-sm z-10 backdrop-blur">
                 <i className="fas fa-exclamation-triangle mr-2"></i>

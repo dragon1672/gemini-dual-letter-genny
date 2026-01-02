@@ -1,6 +1,5 @@
-import React, { useEffect } from 'react';
-import { TextSettings } from '../types';
-import { FONTS } from '../constants';
+import React, { useEffect, useState, useMemo } from 'react';
+import { TextSettings, FontLibrary } from '../types';
 
 interface ControlsProps {
   settings: TextSettings;
@@ -9,6 +8,7 @@ interface ControlsProps {
   onDownload: () => void;
   isGenerating: boolean;
   hasResult: boolean;
+  fontLibrary: FontLibrary;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -18,6 +18,7 @@ const Controls: React.FC<ControlsProps> = ({
   onDownload,
   isGenerating,
   hasResult,
+  fontLibrary,
 }) => {
   const handleChange = <K extends keyof TextSettings>(key: K, value: TextSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -25,6 +26,33 @@ const Controls: React.FC<ControlsProps> = ({
 
   const lengthMismatch = settings.text1.length !== settings.text2.length;
   const truncateLength = Math.min(settings.text1.length, settings.text2.length);
+
+  // Determine current family based on URL
+  const currentFamily = useMemo(() => {
+     for (const [family, variants] of Object.entries(fontLibrary)) {
+         if (variants.some(v => v.url === settings.fontUrl)) return family;
+     }
+     return Object.keys(fontLibrary)[0] || "";
+  }, [settings.fontUrl, fontLibrary]);
+
+  const [selectedFamily, setSelectedFamily] = useState(currentFamily);
+
+  // Sync selected family if URL changes externally or on init
+  useEffect(() => {
+    if (currentFamily && currentFamily !== selectedFamily) {
+        setSelectedFamily(currentFamily);
+    }
+  }, [currentFamily]);
+
+  const handleFamilyChange = (family: string) => {
+      setSelectedFamily(family);
+      // Auto-select best variant (Bold preferred for 3D printing, else Regular)
+      const variants = fontLibrary[family];
+      if (variants && variants.length > 0) {
+          const preferred = variants.find(v => v.name.includes('Bold')) || variants.find(v => v.name.includes('Regular')) || variants[0];
+          handleChange('fontUrl', preferred.url);
+      }
+  };
 
   // Sync mask length
   useEffect(() => {
@@ -34,6 +62,8 @@ const Controls: React.FC<ControlsProps> = ({
          handleChange('supportMask', defaultMask);
      }
   }, [settings.supportEnabled]);
+
+  const availableVariants = fontLibrary[selectedFamily] || [];
 
   return (
     <div className="w-full md:w-96 bg-gray-800 p-6 flex flex-col gap-6 overflow-y-auto h-full border-r border-gray-700 shadow-xl z-10 custom-scrollbar">
@@ -89,19 +119,38 @@ const Controls: React.FC<ControlsProps> = ({
       <hr className="border-gray-700" />
       
       {/* Font Selection */}
-      <div>
-          <label className="block text-xs font-bold text-gray-400 mb-2">Typography</label>
-          <select 
-              className="w-full bg-gray-700 text-white text-xs rounded p-2 border border-gray-600 outline-none"
-              value={settings.fontUrl}
-              onChange={(e) => handleChange('fontUrl', e.target.value)}
-          >
-              {FONTS.map((f, i) => (
-                  <option key={i} value={f.url}>{f.name}</option>
-              ))}
-          </select>
+      <div className="space-y-3">
+          <label className="block text-xs font-bold text-gray-400">Typography</label>
+          
+          <div>
+            <span className="text-[10px] text-gray-500 uppercase">Font Family</span>
+            <select 
+                className="w-full bg-gray-700 text-white text-xs rounded p-2 border border-gray-600 outline-none mt-1"
+                value={selectedFamily}
+                onChange={(e) => handleFamilyChange(e.target.value)}
+            >
+                {Object.keys(fontLibrary).map((family) => (
+                    <option key={family} value={family}>{family}</option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+             <span className="text-[10px] text-gray-500 uppercase">Style / Variant</span>
+             <select 
+                className="w-full bg-gray-700 text-white text-xs rounded p-2 border border-gray-600 outline-none mt-1 disabled:opacity-50"
+                value={settings.fontUrl}
+                onChange={(e) => handleChange('fontUrl', e.target.value)}
+                disabled={availableVariants.length === 0}
+            >
+                {availableVariants.map((v, i) => (
+                    <option key={i} value={v.url}>{v.name}</option>
+                ))}
+            </select>
+          </div>
+          
           <p className="text-[10px] text-gray-500 mt-2">
-            Note: Standard fonts may have limited Unicode support.
+            Loaded {Object.keys(fontLibrary).length} font families.
           </p>
       </div>
 

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Center, Text3D, Grid, Stage } from '@react-three/drei';
+import { OrbitControls, Center, Text3D, Grid, Stage, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { TextSettings, ViewMode } from '../types';
+import { loadFont } from '../services/geometryService';
 
 interface SceneProps {
   settings: TextSettings;
@@ -19,7 +20,30 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
   const t1 = text1.substring(0, len);
   const t2 = text2.substring(0, len);
 
+  const [fontData, setFontData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+      if (fontUrl) {
+          setIsLoading(true);
+          // Small delay to prevent flickering on fast loads
+          const timer = setTimeout(() => {
+             loadFont(fontUrl)
+                .then(f => {
+                    setFontData(f.data);
+                    setIsLoading(false);
+                })
+                .catch(e => {
+                    console.error("Failed to load preview font", e);
+                    setIsLoading(false);
+                });
+          }, 0);
+          return () => clearTimeout(timer);
+      }
+  }, [fontUrl]);
+
   const RenderLetters = ({ text, rotationY, color }: { text: string, rotationY: number, color: string }) => {
+    if (!fontData) return null;
     return (
         <group>
             {text.split('').map((char, i) => {
@@ -28,7 +52,7 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
                     <group key={i} position={[xPos, 0, 0]}>
                         <Center disableY>
                             <Text3D 
-                                font={fontUrl}
+                                font={fontData}
                                 size={fontSize}
                                 height={fontSize * 2.5}
                                 curveSegments={2}
@@ -48,6 +72,17 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
   
   const totalApproxWidth = (len - 1) * (avgCharWidth + gap);
   const baseCenterY = -settings.baseHeight / 2;
+
+  if (isLoading) {
+      return (
+        <Html center>
+            <div className="flex flex-col items-center gap-2 bg-gray-900/80 p-4 rounded-lg backdrop-blur border border-gray-700">
+                <i className="fas fa-circle-notch fa-spin text-blue-500 text-xl"></i>
+                <span className="text-white text-xs font-semibold">Loading Font...</span>
+            </div>
+        </Html>
+      );
+  }
 
   return (
     <group position={[-totalApproxWidth / 2, 0, 0]}>
