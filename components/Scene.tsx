@@ -5,6 +5,22 @@ import * as THREE from 'three';
 import { TextSettings, ViewMode } from '../types';
 import { loadFont } from '../services/geometryService';
 
+// Augment JSX namespace to include Three.js elements for TypeScript support
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      meshStandardMaterial: any;
+      boxGeometry: any;
+      meshBasicMaterial: any;
+      ambientLight: any;
+      directionalLight: any;
+      color: any;
+    }
+  }
+}
+
 interface SceneProps {
   settings: TextSettings;
   generatedGeometry: THREE.BufferGeometry | null;

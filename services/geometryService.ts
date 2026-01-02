@@ -3,6 +3,7 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry';
 import { FontLoader, Font } from 'three/examples/jsm/loaders/FontLoader';
 import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry';
 import { Evaluator, Brush, ADDITION, INTERSECTION } from 'three-bvh-csg';
 import { TextSettings } from '../types';
 
@@ -49,6 +50,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
     spacing, 
     baseHeight, 
     basePadding,
+    baseFillet,
     supportEnabled,
     supportMask,
     supportHeight,
@@ -185,11 +187,20 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       const fullCenter = new THREE.Vector3();
       fullBBox.getCenter(fullCenter);
       
-      const baseGeom = new THREE.BoxGeometry(
-          fullSize.x + basePadding, 
-          baseHeight, 
-          fullSize.z + basePadding
-      );
+      const width = fullSize.x + basePadding;
+      const height = baseHeight;
+      const depth = fullSize.z + basePadding;
+
+      let baseGeom: THREE.BufferGeometry;
+      
+      if (baseFillet) {
+          // Use rounded box with a pleasant radius (e.g., 2 units or clamped by dimensions)
+          const radius = Math.min(2, width/2, depth/2);
+          const segments = 4; // Low segments for CSG performance, but enough for visual roundness
+          baseGeom = new RoundedBoxGeometry(width, height, depth, segments, radius);
+      } else {
+          baseGeom = new THREE.BoxGeometry(width, height, depth);
+      }
       
       const baseBrush = new Brush(baseGeom);
       baseBrush.position.set(
@@ -218,6 +229,11 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 export const exportToSTL = (geometry: THREE.BufferGeometry, filename: string) => {
   const exporter = new STLExporter();
   const mesh = new THREE.Mesh(geometry);
+  
+  // Rotate mesh 90 degrees on X axis to make it Z-up (lay flat for 3D printing)
+  mesh.rotation.x = Math.PI / 2;
+  mesh.updateMatrixWorld();
+
   const result = exporter.parse(mesh, { binary: true });
   const blob = new Blob([result], { type: 'application/octet-stream' });
   const link = document.createElement('a');
