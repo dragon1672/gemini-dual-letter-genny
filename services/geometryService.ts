@@ -55,9 +55,10 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
     supportRadius
   } = settings;
 
-  const length = Math.min(text1.length, text2.length);
-  const t1 = text1.substring(0, length);
-  const t2 = text2.substring(0, length);
+  // Use array spread to correctly handle unicode surrogate pairs (emojis)
+  const t1Chars = [...text1];
+  const t2Chars = [...text2];
+  const length = Math.min(t1Chars.length, t2Chars.length);
 
   const evaluator = new Evaluator();
   evaluator.attributes = ['position', 'normal']; 
@@ -69,7 +70,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 
   let currentXOffset = 0;
 
-  const createCharBrush = (char: string, rotY: number) => {
+  const createCharBrush = (char: string, rotY: number): Brush | null => {
     // Generate text
     const geom = new TextGeometry(char, {
         font,
@@ -79,6 +80,11 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         bevelEnabled: false,
     });
     
+    // Check if geometry actually has data (glyph might be missing)
+    if (!geom.attributes.position || geom.attributes.position.count === 0) {
+        return null;
+    }
+
     geom.computeBoundingBox();
     if (geom.boundingBox) {
         const center = new THREE.Vector3();
@@ -98,19 +104,33 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   };
 
   for (let i = 0; i < length; i++) {
-    const char1 = t1[i];
-    const char2 = t2[i];
+    const char1 = t1Chars[i];
+    const char2 = t2Chars[i];
     let intersectionResult: Brush | null = null;
 
-    if (char1 !== ' ' && char2 !== ' ') {
+    // Check against spaces (and handle potential whitespace chars)
+    const isC1Space = char1.trim() === '';
+    const isC2Space = char2.trim() === '';
+
+    if (!isC1Space && !isC2Space) {
         const brush1 = createCharBrush(char1, Math.PI / 4);
         const brush2 = createCharBrush(char2, -Math.PI / 4);
-        intersectionResult = evaluator.evaluate(brush1, brush2, INTERSECTION);
-    } else if (char1 !== ' ') {
+        
+        if (brush1 && brush2) {
+            // Only perform intersection if both brushes are valid
+            intersectionResult = evaluator.evaluate(brush1, brush2, INTERSECTION);
+        } else if (brush1) {
+             // Fallback if one char is missing in font (rare, but safety net)
+             intersectionResult = brush1; 
+        } else if (brush2) {
+             intersectionResult = brush2;
+        }
+    } else if (!isC1Space) {
         intersectionResult = createCharBrush(char1, Math.PI / 4);
-    } else if (char2 !== ' ') {
+    } else if (!isC2Space) {
         intersectionResult = createCharBrush(char2, -Math.PI / 4);
     } else {
+        // Both spaces
         currentXOffset += gap + (fontSize * 0.5);
         continue;
     }
@@ -119,6 +139,12 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         const bbox = new THREE.Box3().setFromObject(intersectionResult);
         const width = bbox.max.x - bbox.min.x;
         
+        // If the resulting intersection is empty (no overlap), width might be 0 or negative
+        if (width <= 0.001) {
+             currentXOffset += gap + (fontSize * 0.5); // Treat as space-ish
+             continue;
+        }
+
         const centerX = currentXOffset + (width / 2);
         intersectionResult.position.set(centerX, 0, 0);
         intersectionResult.updateMatrixWorld();

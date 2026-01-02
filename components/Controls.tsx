@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { TextSettings, FontLibrary } from '../types';
+import { TextSettings, FontLibrary, FontVariant } from '../types';
 
 interface ControlsProps {
   settings: TextSettings;
@@ -24,13 +24,16 @@ const Controls: React.FC<ControlsProps> = ({
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const lengthMismatch = settings.text1.length !== settings.text2.length;
-  const truncateLength = Math.min(settings.text1.length, settings.text2.length);
+  const text1Len = [...settings.text1].length;
+  const text2Len = [...settings.text2].length;
+  
+  const lengthMismatch = text1Len !== text2Len;
+  const truncateLength = Math.min(text1Len, text2Len);
 
   // Determine current family based on URL
   const currentFamily = useMemo(() => {
      for (const [family, variants] of Object.entries(fontLibrary)) {
-         if (variants.some(v => v.url === settings.fontUrl)) return family;
+         if ((variants as FontVariant[]).some(v => v.url === settings.fontUrl)) return family;
      }
      return Object.keys(fontLibrary)[0] || "";
   }, [settings.fontUrl, fontLibrary]);
@@ -57,7 +60,7 @@ const Controls: React.FC<ControlsProps> = ({
   // Sync mask length
   useEffect(() => {
      if (settings.supportEnabled && settings.supportMask.length === 0) {
-         const len = Math.max(settings.text1.length, settings.text2.length);
+         const len = Math.max(text1Len, text2Len);
          const defaultMask = Array(len).fill('_').join('');
          handleChange('supportMask', defaultMask);
      }
@@ -81,11 +84,11 @@ const Controls: React.FC<ControlsProps> = ({
         <div>
           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Text 1 (Visible from Left)
-            <span className="ml-2 text-gray-500 text-[10px]">{settings.text1.length} chars</span>
+            <span className="ml-2 text-gray-500 text-[10px]">{text1Len} chars</span>
           </label>
           <input
             type="text"
-            maxLength={15}
+            maxLength={30} // Higher visual limit, real limit logic is handled by user awareness
             className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
             value={settings.text1}
             onChange={(e) => handleChange('text1', e.target.value)}
@@ -94,11 +97,11 @@ const Controls: React.FC<ControlsProps> = ({
         <div>
           <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
             Text 2 (Visible from Right)
-             <span className="ml-2 text-gray-500 text-[10px]">{settings.text2.length} chars</span>
+             <span className="ml-2 text-gray-500 text-[10px]">{text2Len} chars</span>
           </label>
           <input
             type="text"
-            maxLength={15}
+            maxLength={30}
             className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:ring-2 focus:ring-blue-500 outline-none font-mono"
             value={settings.text2}
             onChange={(e) => handleChange('text2', e.target.value)}

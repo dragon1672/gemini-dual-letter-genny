@@ -16,9 +16,12 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
   const gap = fontSize * spacing;
   const avgCharWidth = fontSize * 0.7;
 
-  const len = Math.min(text1.length, text2.length);
-  const t1 = text1.substring(0, len);
-  const t2 = text2.substring(0, len);
+  // Use Array spread for unicode awareness
+  const t1Chars = [...text1];
+  const t2Chars = [...text2];
+  const len = Math.min(t1Chars.length, t2Chars.length);
+  const t1 = t1Chars.slice(0, len);
+  const t2 = t2Chars.slice(0, len);
 
   const [fontData, setFontData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,12 +45,14 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
       }
   }, [fontUrl]);
 
-  const RenderLetters = ({ text, rotationY, color }: { text: string, rotationY: number, color: string }) => {
+  const RenderLetters = ({ chars, rotationY, color }: { chars: string[], rotationY: number, color: string }) => {
     if (!fontData) return null;
     return (
         <group>
-            {text.split('').map((char, i) => {
+            {chars.map((char, i) => {
                 const xPos = i * (avgCharWidth + gap);
+                // Skip rendering spaces to avoid warnings or empty geometry issues
+                if (char.trim() === '') return null;
                 return (
                     <group key={i} position={[xPos, 0, 0]}>
                         <Center disableY>
@@ -87,9 +92,9 @@ const PreviewMode: React.FC<{ settings: TextSettings }> = ({ settings }) => {
   return (
     <group position={[-totalApproxWidth / 2, 0, 0]}>
         {/* Text 1 */}
-        <RenderLetters text={t1} rotationY={Math.PI / 4} color="#60a5fa" />
+        <RenderLetters chars={t1} rotationY={Math.PI / 4} color="#60a5fa" />
         {/* Text 2 */}
-        <RenderLetters text={t2} rotationY={-Math.PI / 4} color="#f472b6" />
+        <RenderLetters chars={t2} rotationY={-Math.PI / 4} color="#f472b6" />
         
         {/* Base Preview (Wireframe) */}
         {settings.baseHeight > 0 && (
