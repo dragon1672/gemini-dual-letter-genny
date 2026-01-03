@@ -1,5 +1,6 @@
 {
   "name": "dual-letter-time",
+  "homepage": "dragon1672.github.io",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,17 +10,27 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-three/drei": "9.102.6",
+    "@react-three/fiber": "8.15.16",
+    "manifold-3d": "2.5.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "@react-three/fiber": "8.15.16",
-    "three": "0.161.0",
-    "@react-three/drei": "9.102.6",
-    "manifold-3d": "2.5.1"
+    "three": "0.161.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "gh-pages": "^6.3.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
   }
+
 }
