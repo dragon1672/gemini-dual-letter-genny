@@ -9,6 +9,10 @@ interface VirtualFontSelectorProps {
     placeholder?: string;
 }
 
+// Global cache to prevent reloading same fonts during scrolling
+const loadedFonts = new Set<string>();
+const loadingFonts = new Map<string, Promise<void>>();
+
 // Virtual Font Row Component
 const FontRow = ({ 
     style, 
@@ -25,32 +29,44 @@ const FontRow = ({
     onSelect: (url: string) => void,
     previewText: string
 }) => {
-    const [isLoaded, setIsLoaded] = useState(false);
     const variant = variants[0];
-    // Create a unique font-family name for this session to avoid collisions
+    // Create a unique font-family name for this session
     const fontName = `Preview_${family.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const [isLoaded, setIsLoaded] = useState(loadedFonts.has(fontName));
 
     useEffect(() => {
-        let mounted = true;
-        const loadFont = async () => {
-            // Check if already loaded
-            if (document.fonts.check(`12px "${fontName}"`)) {
-                if (mounted) setIsLoaded(true);
-                return;
-            }
+        if (isLoaded) return;
 
-            try {
-                const font = new FontFace(fontName, `url(${variant.url})`);
-                await font.load();
-                document.fonts.add(font);
-                if (mounted) setIsLoaded(true);
-            } catch (e) {
-                // console.warn("Failed to load preview font", family);
-            }
-        };
-        loadFont();
+        // Double check if loaded by another row in the meantime
+        if (loadedFonts.has(fontName)) {
+            setIsLoaded(true);
+            return;
+        }
+
+        let mounted = true;
+
+        if (!loadingFonts.has(fontName)) {
+            const load = async () => {
+                try {
+                    const font = new FontFace(fontName, `url(${variant.url})`);
+                    await font.load();
+                    document.fonts.add(font);
+                    loadedFonts.add(fontName);
+                } catch (e) {
+                    console.warn(`Failed to load preview font ${fontName}`, e);
+                }
+            };
+            loadingFonts.set(fontName, load());
+        }
+
+        loadingFonts.get(fontName)?.then(() => {
+            if (mounted) setIsLoaded(true);
+        });
+
         return () => { mounted = false; };
-    }, [family, variant.url, fontName]);
+    }, [fontName, variant.url, isLoaded]);
+
+    const fontStyle = { fontFamily: isLoaded ? `"${fontName}", sans-serif` : 'sans-serif' };
 
     return (
         <div 
@@ -61,12 +77,18 @@ const FontRow = ({
             <div className="flex items-baseline justify-between gap-4">
                 <span 
                     className="text-xl text-white truncate leading-none"
-                    style={{ fontFamily: isLoaded ? `"${fontName}", sans-serif` : 'sans-serif' }}
+                    style={fontStyle}
                 >
                     {previewText}
                 </span>
             </div>
-            <span className="text-[10px] text-gray-500 uppercase font-sans mt-1 tracking-wide">{family}</span>
+            {/* Show family name in the font itself if loaded, otherwise generic */}
+            <span 
+                className="text-[10px] text-gray-400 uppercase mt-1 tracking-wide truncate opacity-80"
+                style={fontStyle}
+            >
+                {family}
+            </span>
         </div>
     );
 };
@@ -107,10 +129,12 @@ export const VirtualFontSelector: React.FC<VirtualFontSelectorProps> = ({
     // Focus input when opened
     useEffect(() => {
         if (isOpen) {
-            // Short delay to allow render
             setTimeout(() => {
                 if (inputRef.current) inputRef.current.focus();
             }, 50);
+        } else {
+            // Reset filter when closed? Maybe better to keep it?
+            // setFilter(""); 
         }
     }, [isOpen]);
 
