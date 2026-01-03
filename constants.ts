@@ -1,4 +1,4 @@
-import { FontLibrary } from './types';
+import { FontLibrary, BaseType } from './types';
 import { BASE_URL, RAW_FONT_PATHS } from './font_constants';
 
 export const getFontLibrary = (): FontLibrary => {
@@ -65,7 +65,9 @@ export const DEFAULT_SETTINGS = {
   spacing: 0.15, 
   baseHeight: 2,
   basePadding: 4,
-  baseFillet: true,
+  baseType: 'RECTANGLE' as BaseType,
+  baseCornerRadius: 4,
+  baseTopRounding: 0.5,
   supportEnabled: false,
   supportMask: '',
   supportHeight: 5,

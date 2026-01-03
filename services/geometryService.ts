@@ -50,8 +50,8 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
     spacing, 
     baseHeight, 
     basePadding,
-    baseType,
-    baseCornerRadius,
+    baseType, 
+    baseCornerRadius, 
     baseTopRounding,
     supportEnabled,
     supportMask,
@@ -78,7 +78,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   const supportGeometries: THREE.BufferGeometry[] = [];
 
   const createCharBrush = (char: string, rotY: number): Brush | null => {
-    const geom = new TextGeometry(char, {
+    let geom: THREE.BufferGeometry = new TextGeometry(char, {
         font,
         size: fontSize,
         depth: extrusionDepth,
@@ -86,6 +86,10 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         bevelEnabled: false,
     });
     
+    // PRE-WELD: Fix non-manifold font geometry before CSG
+    // This removes duplicate vertices and ensures the mesh is "watertight"
+    geom = BufferGeometryUtils.mergeVertices(geom, 0.0001);
+
     if (!geom.attributes.position || geom.attributes.position.count === 0) return null;
 
     geom.computeBoundingBox();
@@ -115,6 +119,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         const b1 = createCharBrush(char1, Math.PI / 4);
         const b2 = createCharBrush(char2, -Math.PI / 4);
         if (b1 && b2) {
+            // Because inputs are pre-welded, INTERSECTION is much cleaner
             resultBrush = evaluator.evaluate(b1, b2, INTERSECTION);
         } else {
             resultBrush = b1 || b2;
@@ -139,12 +144,11 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
             
             letterBrushes.push(resultBrush);
 
-            // Generate Support Geometry (merged later)
+            // Generate Support Geometry
             if (supportEnabled) {
                 const maskChar = (i < supportMask.length) ? supportMask[i] : '_';
                 if (maskChar !== '_' && maskChar !== ' ') {
                     const cylGeom = new THREE.CylinderGeometry(supportRadius, supportRadius, supportHeight, 16);
-                    // Embed 0.5 into base, 0.5 into text to ensure overlap
                     cylGeom.translate(centerX, supportHeight / 2 - 0.5, 0);
                     supportGeometries.push(cylGeom);
                 }
@@ -160,29 +164,25 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       return new THREE.BufferGeometry();
   }
 
-  // --- 1. Consolidate Letters ---
-  // Merging all letter brushes into one brush first is usually cleaner/faster than chaining ADDITION
-  // However, Evaluator works on Brushes. We can merge geometries if they don't overlap heavily.
-  // Since they are spaced out, we can merge their geometries into one mesh.
-  
-  const allLetterGeoms: THREE.BufferGeometry[] = [];
-  letterBrushes.forEach(b => {
-      // Bake the transform into the geometry
-      const g = b.geometry.clone();
-      g.applyMatrix4(b.matrixWorld);
-      allLetterGeoms.push(g);
-  });
+  // --- 1. Consolidate Letters via CSG Union ---
+  let combinedBrush = letterBrushes[0];
+  combinedBrush.updateMatrixWorld();
 
-  let mergedLettersGeom = BufferGeometryUtils.mergeGeometries(allLetterGeoms, false);
-  if (!mergedLettersGeom) return new THREE.BufferGeometry();
-  
-  let combinedBrush = new Brush(mergedLettersGeom);
+  for (let i = 1; i < letterBrushes.length; i++) {
+      const nextBrush = letterBrushes[i];
+      nextBrush.updateMatrixWorld();
+      combinedBrush = evaluator.evaluate(combinedBrush, nextBrush, ADDITION);
+  }
 
-  // --- 2. Add Supports ---
+  // --- 2. Add Supports (Pre-welded) ---
   if (supportGeometries.length > 0) {
-      const mergedSupports = BufferGeometryUtils.mergeGeometries(supportGeometries, false);
+      let mergedSupports = BufferGeometryUtils.mergeGeometries(supportGeometries, false);
       if (mergedSupports) {
+          // PRE-WELD: Ensure supports are manifold before union
+          mergedSupports = BufferGeometryUtils.mergeVertices(mergedSupports, 0.0001);
+          
           const supportBrush = new Brush(mergedSupports);
+          supportBrush.updateMatrixWorld();
           combinedBrush = evaluator.evaluate(combinedBrush, supportBrush, ADDITION);
       }
   }
@@ -223,7 +223,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       }
 
       // Extrude with Bevel for "Vertical Curving"
-      // Note: Bevel adds to the size, so we might get a slightly larger base, which is usually fine.
       const extrudeSettings = {
           depth: baseHeight, 
           bevelEnabled: baseTopRounding > 0,
@@ -232,36 +231,26 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           bevelSegments: 6, // Smooth bevel
       };
       
-      const baseGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+      let baseGeom: THREE.BufferGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
       
       // Fix Orientation: Extrude is along Z. We want it along Y (Up).
       // Rotate -90 on X puts Z axis to Y axis.
       baseGeom.rotateX(-Math.PI / 2);
       
+      // PRE-WELD: Base geometry
+      baseGeom = BufferGeometryUtils.mergeVertices(baseGeom, 0.0001);
+      
       const baseBrush = new Brush(baseGeom);
       
       // Position Strategy:
       // The extrusion starts at Z=0 (after rotation becomes Y=0) and goes to Y=depth.
-      // Bevel adds to the front (top) and back (bottom).
       // We want the TOP of the base to intersect the text.
-      // Text bottom is Y=0.
-      // We want overlap. Overlap amount = 0.5.
-      // So Base Top Face should be at Y = 0.5.
-      
-      // The ExtrudeGeometry total height is roughly: depth + 2 * bevelThickness (front and back).
-      // Center the mesh geometry first? No, easier to position blindly.
-      // By default, Shape is at Z=0. Extrudes to Z=depth.
-      // Bevel extends Z to -thickness and Z=depth+thickness.
-      // Rotated -90 X:
-      // Z -> Y.
-      // So Top Y = depth + thickness.
-      // Bottom Y = -thickness.
-      
-      // We want Top Y to be at +0.5.
-      // So we translate Y by: 0.5 - (depth + thickness).
+      // Text starts at Y=0 and goes up.
       
       const topY = baseHeight + (baseTopRounding > 0 ? baseTopRounding : 0);
-      const overlap = 0.5; // generous overlap for fusion
+      
+      // Increased overlap to ensure robust intersection and prevent "floating" geometry
+      const overlap = 0.8; 
       const targetTopY = overlap; 
       const yTranslation = targetTopY - topY;
 
@@ -269,23 +258,11 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       baseBrush.updateMatrixWorld();
 
       // --- 4. Flatten Bottom ---
-      // The extruded base likely has a bevel on the bottom (because bevelEnabled applies to both sides).
-      // We want a flat bottom for printing.
-      // We need to cut off everything below a certain plane.
-      // Our "Effective Bottom" we want to keep is roughly where the main extrusion starts (excluding bottom bevel).
-      // Or just an arbitrary flat cut.
-      // Let's cut at Y = yTranslation + (baseTopRounding > 0 ? baseTopRounding : 0) ? 
-      // Actually, if we just want a flat bottom, we can subtract a giant box below the "flat" part.
-      // The "flat" bottom of the main extrusion body is at Y = yTranslation (since original Z=0 maps to Y=yTrans).
-      // The bottom bevel is below that (from yTrans to yTrans - bevel).
-      // So we cut everything below Y = yTranslation.
-      
       if (baseTopRounding > 0) {
-          // Create a floor cutter
+          // Create a floor cutter to remove the bottom bevel generated by ExtrudeGeometry
           const cutterGeom = new THREE.BoxGeometry(1000, 100, 1000);
           const cutter = new Brush(cutterGeom);
-          // Top of cutter should be at Y = yTranslation
-          // Center of cutter = yTranslation - 50;
+          // Cut everything below Y = yTranslation
           cutter.position.set(0, yTranslation - 50, 0);
           cutter.updateMatrixWorld();
           
@@ -298,7 +275,16 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       }
   }
 
-  const finalGeom = combinedBrush.geometry;
+  // --- Final Geometry Cleanup ---
+  let finalGeom = combinedBrush.geometry;
+  
+  // Remove UVs and Color attributes to ensure clean merging for STL
+  if (finalGeom.getAttribute('uv')) finalGeom.deleteAttribute('uv');
+  if (finalGeom.getAttribute('color')) finalGeom.deleteAttribute('color');
+
+  // Weld vertices to close microscopic non-manifold gaps
+  finalGeom = BufferGeometryUtils.mergeVertices(finalGeom, 0.001);
+
   finalGeom.computeBoundingBox();
   finalGeom.computeVertexNormals();
   
