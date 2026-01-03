@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { TextSettings, ViewMode } from '../types';
 import { loadFont } from '../services/geometryService';
 
-// Augment JSX namespace to include Three.js elements for TypeScript support
+// Augment JSX namespace to include Three.js elements
 declare global {
   namespace JSX {
     interface IntrinsicElements {

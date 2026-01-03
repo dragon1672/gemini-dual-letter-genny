@@ -1,3 +1,5 @@
+export type BaseType = 'RECTANGLE' | 'OVAL';
+
 export interface TextSettings {
   text1: string;
   text2: string;
@@ -6,7 +8,9 @@ export interface TextSettings {
   spacing: number;
   baseHeight: number;
   basePadding: number;
-  baseFillet: boolean;
+  baseType: BaseType;
+  baseCornerRadius: number;
+  baseTopRounding: number;
   supportEnabled: boolean;
   supportMask: string;
   supportHeight: number;

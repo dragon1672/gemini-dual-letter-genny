@@ -3,9 +3,9 @@ import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry';
 import { FontLoader, Font } from 'three/examples/jsm/loaders/FontLoader';
 import { TTFLoader } from 'three/examples/jsm/loaders/TTFLoader';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry';
-import { Evaluator, Brush, ADDITION, INTERSECTION } from 'three-bvh-csg';
+import { Evaluator, Brush, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 import { TextSettings } from '../types';
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 let cachedFont: Font | null = null;
 let cachedFontName: string | null = null;
@@ -50,14 +50,15 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
     spacing, 
     baseHeight, 
     basePadding,
-    baseFillet,
+    baseType,
+    baseCornerRadius,
+    baseTopRounding,
     supportEnabled,
     supportMask,
     supportHeight,
     supportRadius
   } = settings;
 
-  // Use array spread to correctly handle unicode surrogate pairs (emojis)
   const t1Chars = [...text1];
   const t2Chars = [...text2];
   const length = Math.min(t1Chars.length, t2Chars.length);
@@ -65,37 +66,34 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   const evaluator = new Evaluator();
   evaluator.attributes = ['position', 'normal']; 
   evaluator.useGroups = false;
-
-  let finalBrush: Brush | null = null;
+  
   const gap = fontSize * spacing;
   const extrusionDepth = fontSize * 3; 
 
   let currentXOffset = 0;
+  
+  // Collect all valid intersection brushes (the letters)
+  const letterBrushes: Brush[] = [];
+  // Collect support cylinders
+  const supportGeometries: THREE.BufferGeometry[] = [];
 
   const createCharBrush = (char: string, rotY: number): Brush | null => {
-    // Generate text
     const geom = new TextGeometry(char, {
         font,
         size: fontSize,
         depth: extrusionDepth,
-        curveSegments: 4,
+        curveSegments: 8,
         bevelEnabled: false,
     });
     
-    // Check if geometry actually has data (glyph might be missing)
-    if (!geom.attributes.position || geom.attributes.position.count === 0) {
-        return null;
-    }
+    if (!geom.attributes.position || geom.attributes.position.count === 0) return null;
 
     geom.computeBoundingBox();
     if (geom.boundingBox) {
         const center = new THREE.Vector3();
         geom.boundingBox.getCenter(center);
-        
-        // 1. Center on X/Z
-        // 2. Align bottom (min.y) to 0 to fix floating issues
+        // Align bottom (min.y) to 0
         const yOffset = -geom.boundingBox.min.y;
-        
         geom.translate(-center.x, yOffset, -center.z);
     }
 
@@ -108,115 +106,203 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   for (let i = 0; i < length; i++) {
     const char1 = t1Chars[i];
     const char2 = t2Chars[i];
-    let intersectionResult: Brush | null = null;
-
-    // Check against spaces (and handle potential whitespace chars)
     const isC1Space = char1.trim() === '';
     const isC2Space = char2.trim() === '';
 
+    let resultBrush: Brush | null = null;
+
     if (!isC1Space && !isC2Space) {
-        const brush1 = createCharBrush(char1, Math.PI / 4);
-        const brush2 = createCharBrush(char2, -Math.PI / 4);
-        
-        if (brush1 && brush2) {
-            // Only perform intersection if both brushes are valid
-            intersectionResult = evaluator.evaluate(brush1, brush2, INTERSECTION);
-        } else if (brush1) {
-             // Fallback if one char is missing in font (rare, but safety net)
-             intersectionResult = brush1; 
-        } else if (brush2) {
-             intersectionResult = brush2;
+        const b1 = createCharBrush(char1, Math.PI / 4);
+        const b2 = createCharBrush(char2, -Math.PI / 4);
+        if (b1 && b2) {
+            resultBrush = evaluator.evaluate(b1, b2, INTERSECTION);
+        } else {
+            resultBrush = b1 || b2;
         }
     } else if (!isC1Space) {
-        intersectionResult = createCharBrush(char1, Math.PI / 4);
+        resultBrush = createCharBrush(char1, Math.PI / 4);
     } else if (!isC2Space) {
-        intersectionResult = createCharBrush(char2, -Math.PI / 4);
+        resultBrush = createCharBrush(char2, -Math.PI / 4);
     } else {
-        // Both spaces
         currentXOffset += gap + (fontSize * 0.5);
         continue;
     }
 
-    if (intersectionResult) {
-        const bbox = new THREE.Box3().setFromObject(intersectionResult);
+    if (resultBrush) {
+        const bbox = new THREE.Box3().setFromObject(resultBrush);
         const width = bbox.max.x - bbox.min.x;
         
-        // If the resulting intersection is empty (no overlap), width might be 0 or negative
-        if (width <= 0.001) {
-             currentXOffset += gap + (fontSize * 0.5); // Treat as space-ish
-             continue;
-        }
+        if (width > 0.001) {
+            const centerX = currentXOffset + (width / 2);
+            resultBrush.position.set(centerX, 0, 0);
+            resultBrush.updateMatrixWorld();
+            
+            letterBrushes.push(resultBrush);
 
-        const centerX = currentXOffset + (width / 2);
-        intersectionResult.position.set(centerX, 0, 0);
-        intersectionResult.updateMatrixWorld();
-
-        if (!finalBrush) {
-            finalBrush = intersectionResult;
-        } else {
-            finalBrush = evaluator.evaluate(finalBrush, intersectionResult, ADDITION);
-        }
-        
-        // Add Supports (Extend Upwards)
-        if (supportEnabled) {
-            const maskChar = (i < supportMask.length) ? supportMask[i] : '_';
-            if (maskChar !== '_' && maskChar !== ' ') {
-                const cylGeom = new THREE.CylinderGeometry(supportRadius, supportRadius, supportHeight, 16);
-                const cylBrush = new Brush(cylGeom);
-                // Center Y = supportHeight / 2 -> Bottom at 0
-                cylBrush.position.set(centerX, supportHeight / 2, 0);
-                cylBrush.updateMatrixWorld();
-
-                finalBrush = evaluator.evaluate(finalBrush, cylBrush, ADDITION);
+            // Generate Support Geometry (merged later)
+            if (supportEnabled) {
+                const maskChar = (i < supportMask.length) ? supportMask[i] : '_';
+                if (maskChar !== '_' && maskChar !== ' ') {
+                    const cylGeom = new THREE.CylinderGeometry(supportRadius, supportRadius, supportHeight, 16);
+                    // Embed 0.5 into base, 0.5 into text to ensure overlap
+                    cylGeom.translate(centerX, supportHeight / 2 - 0.5, 0);
+                    supportGeometries.push(cylGeom);
+                }
             }
+            currentXOffset += width + gap;
+        } else {
+            currentXOffset += gap + (fontSize * 0.5);
         }
-
-        currentXOffset += width + gap;
     }
   }
 
-  if (!finalBrush) {
+  if (letterBrushes.length === 0) {
       return new THREE.BufferGeometry();
   }
 
-  // --- Create Main Base ---
+  // --- 1. Consolidate Letters ---
+  // Merging all letter brushes into one brush first is usually cleaner/faster than chaining ADDITION
+  // However, Evaluator works on Brushes. We can merge geometries if they don't overlap heavily.
+  // Since they are spaced out, we can merge their geometries into one mesh.
+  
+  const allLetterGeoms: THREE.BufferGeometry[] = [];
+  letterBrushes.forEach(b => {
+      // Bake the transform into the geometry
+      const g = b.geometry.clone();
+      g.applyMatrix4(b.matrixWorld);
+      allLetterGeoms.push(g);
+  });
+
+  let mergedLettersGeom = BufferGeometryUtils.mergeGeometries(allLetterGeoms, false);
+  if (!mergedLettersGeom) return new THREE.BufferGeometry();
+  
+  let combinedBrush = new Brush(mergedLettersGeom);
+
+  // --- 2. Add Supports ---
+  if (supportGeometries.length > 0) {
+      const mergedSupports = BufferGeometryUtils.mergeGeometries(supportGeometries, false);
+      if (mergedSupports) {
+          const supportBrush = new Brush(mergedSupports);
+          combinedBrush = evaluator.evaluate(combinedBrush, supportBrush, ADDITION);
+      }
+  }
+
+  // --- 3. Create Base with Shape Extrusion ---
   if (baseHeight > 0) {
-      const fullBBox = new THREE.Box3().setFromObject(finalBrush);
+      const fullBBox = new THREE.Box3().setFromObject(combinedBrush);
       const fullSize = new THREE.Vector3();
       fullBBox.getSize(fullSize);
       const fullCenter = new THREE.Vector3();
       fullBBox.getCenter(fullCenter);
       
       const width = fullSize.x + basePadding;
-      const height = baseHeight;
       const depth = fullSize.z + basePadding;
-
-      let baseGeom: THREE.BufferGeometry;
       
-      if (baseFillet) {
-          // Use rounded box with a pleasant radius (e.g., 2 units or clamped by dimensions)
-          const radius = Math.min(2, width/2, depth/2);
-          const segments = 4; // Low segments for CSG performance, but enough for visual roundness
-          baseGeom = new RoundedBoxGeometry(width, height, depth, segments, radius);
+      const shape = new THREE.Shape();
+      
+      // Draw shape centered at 0,0 (which will be X,Z)
+      const x = -width / 2;
+      const y = -depth / 2;
+      
+      if (baseType === 'RECTANGLE') {
+          // Rounded Rectangle
+          // Clamp radius to not exceed dimensions
+          const r = Math.min(baseCornerRadius, width/2, depth/2);
+          shape.moveTo(x + r, y);
+          shape.lineTo(x + width - r, y);
+          shape.quadraticCurveTo(x + width, y, x + width, y + r);
+          shape.lineTo(x + width, y + depth - r);
+          shape.quadraticCurveTo(x + width, y + depth, x + width - r, y + depth);
+          shape.lineTo(x + r, y + depth);
+          shape.quadraticCurveTo(x, y + depth, x, y + depth - r);
+          shape.lineTo(x, y + r);
+          shape.quadraticCurveTo(x, y, x + r, y);
       } else {
-          baseGeom = new THREE.BoxGeometry(width, height, depth);
+          // Oval / Ellipse
+          shape.absellipse(0, 0, width / 2, depth / 2, 0, Math.PI * 2, false, 0);
       }
+
+      // Extrude with Bevel for "Vertical Curving"
+      // Note: Bevel adds to the size, so we might get a slightly larger base, which is usually fine.
+      const extrudeSettings = {
+          depth: baseHeight, 
+          bevelEnabled: baseTopRounding > 0,
+          bevelThickness: baseTopRounding,
+          bevelSize: baseTopRounding,
+          bevelSegments: 6, // Smooth bevel
+      };
+      
+      const baseGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+      
+      // Fix Orientation: Extrude is along Z. We want it along Y (Up).
+      // Rotate -90 on X puts Z axis to Y axis.
+      baseGeom.rotateX(-Math.PI / 2);
       
       const baseBrush = new Brush(baseGeom);
-      baseBrush.position.set(
-          fullCenter.x, 
-          -baseHeight / 2, 
-          fullCenter.z
-      );
+      
+      // Position Strategy:
+      // The extrusion starts at Z=0 (after rotation becomes Y=0) and goes to Y=depth.
+      // Bevel adds to the front (top) and back (bottom).
+      // We want the TOP of the base to intersect the text.
+      // Text bottom is Y=0.
+      // We want overlap. Overlap amount = 0.5.
+      // So Base Top Face should be at Y = 0.5.
+      
+      // The ExtrudeGeometry total height is roughly: depth + 2 * bevelThickness (front and back).
+      // Center the mesh geometry first? No, easier to position blindly.
+      // By default, Shape is at Z=0. Extrudes to Z=depth.
+      // Bevel extends Z to -thickness and Z=depth+thickness.
+      // Rotated -90 X:
+      // Z -> Y.
+      // So Top Y = depth + thickness.
+      // Bottom Y = -thickness.
+      
+      // We want Top Y to be at +0.5.
+      // So we translate Y by: 0.5 - (depth + thickness).
+      
+      const topY = baseHeight + (baseTopRounding > 0 ? baseTopRounding : 0);
+      const overlap = 0.5; // generous overlap for fusion
+      const targetTopY = overlap; 
+      const yTranslation = targetTopY - topY;
+
+      baseBrush.position.set(fullCenter.x, yTranslation, fullCenter.z); // Center X/Z on text
       baseBrush.updateMatrixWorld();
 
-      finalBrush = evaluator.evaluate(finalBrush, baseBrush, ADDITION);
+      // --- 4. Flatten Bottom ---
+      // The extruded base likely has a bevel on the bottom (because bevelEnabled applies to both sides).
+      // We want a flat bottom for printing.
+      // We need to cut off everything below a certain plane.
+      // Our "Effective Bottom" we want to keep is roughly where the main extrusion starts (excluding bottom bevel).
+      // Or just an arbitrary flat cut.
+      // Let's cut at Y = yTranslation + (baseTopRounding > 0 ? baseTopRounding : 0) ? 
+      // Actually, if we just want a flat bottom, we can subtract a giant box below the "flat" part.
+      // The "flat" bottom of the main extrusion body is at Y = yTranslation (since original Z=0 maps to Y=yTrans).
+      // The bottom bevel is below that (from yTrans to yTrans - bevel).
+      // So we cut everything below Y = yTranslation.
+      
+      if (baseTopRounding > 0) {
+          // Create a floor cutter
+          const cutterGeom = new THREE.BoxGeometry(1000, 100, 1000);
+          const cutter = new Brush(cutterGeom);
+          // Top of cutter should be at Y = yTranslation
+          // Center of cutter = yTranslation - 50;
+          cutter.position.set(0, yTranslation - 50, 0);
+          cutter.updateMatrixWorld();
+          
+          // Cut the bottom bevel off the base
+          const flatBottomBase = evaluator.evaluate(baseBrush, cutter, SUBTRACTION);
+          combinedBrush = evaluator.evaluate(combinedBrush, flatBottomBase, ADDITION);
+      } else {
+          // No bevel, bottom is already flat
+          combinedBrush = evaluator.evaluate(combinedBrush, baseBrush, ADDITION);
+      }
   }
 
-  const finalGeom = finalBrush.geometry;
+  const finalGeom = combinedBrush.geometry;
   finalGeom.computeBoundingBox();
   finalGeom.computeVertexNormals();
   
+  // Center geometry at origin for clean export
   if (finalGeom.boundingBox) {
       const center = new THREE.Vector3();
       finalGeom.boundingBox.getCenter(center);
@@ -230,7 +316,8 @@ export const exportToSTL = (geometry: THREE.BufferGeometry, filename: string) =>
   const exporter = new STLExporter();
   const mesh = new THREE.Mesh(geometry);
   
-  // Rotate mesh 90 degrees on X axis to make it Z-up (lay flat for 3D printing)
+  // Correct rotation for 3D printing (Z-up)
+  // +90 degrees on X axis
   mesh.rotation.x = Math.PI / 2;
   mesh.updateMatrixWorld();
 
