@@ -1,3 +1,4 @@
+
 import { FontLibrary, BaseType, SupportType, TextSettings } from './types';
 import { BASE_URL, RAW_FONT_PATHS } from './font_constants';
 
@@ -47,8 +48,8 @@ export const getFontLibrary = (): FontLibrary => {
 };
 
 const library = getFontLibrary();
-const defaultFamily = 'IBMPlex Sans JP';
-const defaultUrl = library[defaultFamily]?.[1]?.url || library['Roboto']?.[0]?.url;
+const defaultFamily = 'Abhaya Libre'; 
+const defaultUrl = library[defaultFamily]?.[0]?.url || library['Roboto']?.[0]?.url;
 
 export const DEFAULT_SETTINGS: TextSettings = {
   text1: '♥YE♥',

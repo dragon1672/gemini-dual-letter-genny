@@ -25,7 +25,7 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
             newArr[index] = {
                 ...current,
                 ...changes,
-                transform: changes.transform ? { ...current.transform, ...changes.transform } : current.transform,
+                // Manually merge nested objects if they are present in changes
                 support: changes.support ? { ...current.support, ...changes.support } : current.support,
                 bridge: changes.bridge ? { ...current.bridge, ...changes.bridge } : current.bridge,
                 isOverridden: true
@@ -46,9 +46,9 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                 char1FontUrl: undefined,
                 char2FontUrl: undefined,
                 embedDepth: undefined,
-                char1Width: undefined,
-                char2Width: undefined,
-                transform: { scaleX: 1, scaleY: 1, moveX: 0, moveZ: 0 },
+                char1Transform: { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 },
+                char2Transform: { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 },
+                pairSpacing: { x: 0, z: 0 },
                 support: { 
                     enabled: prev.supportEnabled, 
                     type: prev.supportType, 

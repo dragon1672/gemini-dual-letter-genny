@@ -1,5 +1,6 @@
+
 import React, { useMemo } from 'react';
-import { IntersectionConfig, TextSettings, SupportType, FontLibrary } from '../../types';
+import { IntersectionConfig, TextSettings, SupportType, FontLibrary, CharTransform } from '../../types';
 import { Accordion } from '../shared/Accordion';
 import { VirtualFontSelector } from '../VirtualFontSelector';
 
@@ -22,6 +23,50 @@ const getVariantsForUrl = (fontLibrary: FontLibrary, url?: string) => {
     }
     return [];
 };
+
+const TransformInputs = ({ 
+    label, 
+    values, 
+    onChange 
+}: { 
+    label: string, 
+    values: CharTransform, 
+    onChange: (v: Partial<CharTransform>) => void 
+}) => (
+    <div className="bg-gray-800/50 p-2 rounded border border-gray-700">
+        <label className="text-[9px] uppercase text-gray-400 block mb-2 font-bold">{label}</label>
+        <div className="grid grid-cols-2 gap-2">
+            <div>
+                <label className="text-[9px] uppercase text-gray-500">Scale X</label>
+                <input type="number" step="0.1" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600 text-white"
+                    value={values.scaleX}
+                    onChange={(e) => onChange({ scaleX: Number(e.target.value) })}
+                />
+            </div>
+            <div>
+                <label className="text-[9px] uppercase text-gray-500">Scale Y</label>
+                <input type="number" step="0.1" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600 text-white"
+                    value={values.scaleY}
+                    onChange={(e) => onChange({ scaleY: Number(e.target.value) })}
+                />
+            </div>
+            <div>
+                <label className="text-[9px] uppercase text-gray-500">Move X</label>
+                <input type="number" step="0.1" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600 text-white"
+                    value={values.moveX}
+                    onChange={(e) => onChange({ moveX: Number(e.target.value) })}
+                />
+            </div>
+            <div>
+                <label className="text-[9px] uppercase text-gray-500">Move Y</label>
+                <input type="number" step="0.1" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600 text-white"
+                    value={values.moveY}
+                    onChange={(e) => onChange({ moveY: Number(e.target.value) })}
+                />
+            </div>
+        </div>
+    </div>
+);
 
 export const IntersectionEditor: React.FC<IntersectionEditorProps> = ({ 
     selectedIdx, 
@@ -132,54 +177,35 @@ export const IntersectionEditor: React.FC<IntersectionEditorProps> = ({
                 </div>
             </Accordion>
 
-            <Accordion title="Character Scaling" contentClassName="p-3">
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                        <label className="text-[9px] uppercase text-blue-300 block mb-1">Width: {selectedConfig.char1}</label>
-                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.char1Width ?? 1}
-                            onChange={(e) => updateConfig(selectedIdx, { char1Width: Number(e.target.value) })}
-                        />
-                        </div>
-                        <div>
-                        <label className="text-[9px] uppercase text-pink-300 block mb-1">Width: {selectedConfig.char2}</label>
-                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.char2Width ?? 1}
-                            onChange={(e) => updateConfig(selectedIdx, { char2Width: Number(e.target.value) })}
-                        />
-                        </div>
+            <Accordion title="Character Transforms" contentClassName="p-3">
+                <div className="space-y-3">
+                     <TransformInputs 
+                        label={`Transform ${selectedConfig.char1} (Blue)`}
+                        values={selectedConfig.char1Transform}
+                        onChange={(v) => updateConfig(selectedIdx, c => ({ char1Transform: { ...c.char1Transform, ...v } }))}
+                     />
+                     <TransformInputs 
+                        label={`Transform ${selectedConfig.char2} (Pink)`}
+                        values={selectedConfig.char2Transform}
+                        onChange={(v) => updateConfig(selectedIdx, c => ({ char2Transform: { ...c.char2Transform, ...v } }))}
+                     />
                 </div>
-                <p className="text-[9px] text-gray-500 italic mt-1">Stretches individual characters before intersection to fit better.</p>
             </Accordion>
 
-            <Accordion title="Result Transform" contentClassName="p-3">
+            <Accordion title="Pair Positioning" contentClassName="p-3">
                 <div className="grid grid-cols-2 gap-3">
-                        <div>
-                        <label className="text-[9px] uppercase text-gray-500">Scale X</label>
-                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.transform.scaleX}
-                            onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, scaleX: Number(e.target.value) } }))}
-                        />
-                        </div>
-                        <div>
-                        <label className="text-[9px] uppercase text-gray-500">Scale Y</label>
-                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.transform.scaleY}
-                            onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, scaleY: Number(e.target.value) } }))}
-                        />
-                        </div>
                         <div>
                         <label className="text-[9px] uppercase text-gray-500">Offset X</label>
                         <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.transform.moveX}
-                            onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, moveX: Number(e.target.value) } }))}
+                            value={selectedConfig.pairSpacing.x}
+                            onChange={(e) => updateConfig(selectedIdx, c => ({ pairSpacing: { ...c.pairSpacing, x: Number(e.target.value) } }))}
                         />
                         </div>
                         <div>
                         <label className="text-[9px] uppercase text-gray-500">Offset Z</label>
                         <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                            value={selectedConfig.transform.moveZ}
-                            onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, moveZ: Number(e.target.value) } }))}
+                            value={selectedConfig.pairSpacing.z}
+                            onChange={(e) => updateConfig(selectedIdx, c => ({ pairSpacing: { ...c.pairSpacing, z: Number(e.target.value) } }))}
                         />
                         </div>
                 </div>

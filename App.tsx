@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import Controls from './components/Controls';
@@ -43,9 +44,9 @@ const App: React.FC = () => {
                         char2: t2Chars[i] || '',
                         isOverridden: false,
                         // Defaults for new fields
-                        char1Width: 1,
-                        char2Width: 1,
-                        transform: { scaleX: 1, scaleY: 1, moveX: 0, moveZ: 0 },
+                        char1Transform: { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 },
+                        char2Transform: { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 },
+                        pairSpacing: { x: 0, z: 0 },
                         support: { 
                             enabled: prev.supportEnabled, 
                             type: prev.supportType, 
@@ -70,7 +71,7 @@ const App: React.FC = () => {
             }
         }
 
-        // 2. Update chars and sync defaults
+        // 2. Update chars and sync defaults for existing items if they are missing fields (migration)
         const updated = newConfig.map((conf, i) => {
              const c1 = t1Chars[i] || '';
              const c2 = t2Chars[i] || '';
@@ -85,6 +86,11 @@ const App: React.FC = () => {
                      width: prev.supportRadius
                  };
              }
+             
+             // Migration for new structure
+             if (!next.char1Transform) next.char1Transform = { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 };
+             if (!next.char2Transform) next.char2Transform = { scaleX: 1, scaleY: 1, moveX: 0, moveY: 0 };
+             if (!next.pairSpacing) next.pairSpacing = { x: 0, z: 0 };
              
              // Ensure bridge exists for older configs
              if (!next.bridge) {

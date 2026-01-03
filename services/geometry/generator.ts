@@ -1,5 +1,6 @@
+
 import * as THREE from 'three';
-import { TextSettings, SupportType } from '../../types';
+import { TextSettings, SupportType, CharTransform } from '../../types';
 import { loadFont } from './text';
 import { getManifold } from './loader';
 import { fromManifold } from './converters';
@@ -252,7 +253,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       let font1 = globalFont;
       let font2 = globalFont;
 
-      // Helper to resolve font override
       const resolveFont = async (url?: string) => {
           if (url && url !== settings.fontUrl) {
               try {
@@ -264,7 +264,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           return globalFont;
       };
 
-      // Load overrides if needed
       if (config.char1FontUrl || config.fontUrl) {
           font1 = await resolveFont(config.char1FontUrl || config.fontUrl);
       }
@@ -272,17 +271,26 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           font2 = await resolveFont(config.char2FontUrl || config.fontUrl);
       }
 
-      const getCharManifold = (c: string, scaleWidth: number, font: any) => {
+      const getCharManifold = (c: string, transform: CharTransform, font: any) => {
           if (c.trim() === '') return null;
           const shapes = font.generateShapes(c, fontSize);
           if (!shapes || shapes.length === 0) return null;
           let mani = shapesToManifold(shapes, m, extrusionDepth);
           
-          // Apply sub-char width scaling if not 1
-          if (mani && scaleWidth !== 1 && scaleWidth > 0) {
-              const scaled = mani.scale([scaleWidth, 1, 1]); // Scale X (width)
-              mani.delete();
-              return scaled;
+          if (mani) {
+              // Apply Per-Char Transforms (in 2D space basically, before rotation)
+              // We effectively scale X/Y and translate X/Y relative to the character origin
+              const { scaleX, scaleY, moveX, moveY } = transform;
+              if (scaleX !== 1 || scaleY !== 1) {
+                   const scaled = mani.scale([scaleX, scaleY, 1]); 
+                   mani.delete();
+                   mani = scaled;
+              }
+              if (moveX !== 0 || moveY !== 0) {
+                   const moved = mani.translate([moveX * fontSize * 0.1, moveY * fontSize * 0.1, 0]);
+                   mani.delete();
+                   mani = moved;
+              }
           }
           return mani;
       };
@@ -293,13 +301,14 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 
       try {
         if (!isC1Space) {
-             const raw = getCharManifold(char1, config.char1Width ?? 1, font1);
+             const raw = getCharManifold(char1, config.char1Transform, font1);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
                 const bottomY = b.min[1];
                 const centerZ = (b.max[2] + b.min[2]) / 2;
                 const centered = raw.translate([-centerX, -bottomY, -centerZ]);
+                // Rotate for Intersection (Text 1)
                 m1 = centered.rotate([0, 45, 0]); 
                 raw.delete();
                 centered.delete();
@@ -307,13 +316,14 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         }
 
         if (!isC2Space) {
-             const raw = getCharManifold(char2, config.char2Width ?? 1, font2);
+             const raw = getCharManifold(char2, config.char2Transform, font2);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
                 const bottomY = b.min[1];
                 const centerZ = (b.max[2] + b.min[2]) / 2;
                 const centered = raw.translate([-centerX, -bottomY, -centerZ]);
+                // Rotate for Intersection (Text 2)
                 m2 = centered.rotate([0, -45, 0]); 
                 raw.delete();
                 centered.delete();
@@ -350,7 +360,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       if (m2) m2.delete();
 
       if (resultManifold) {
-          // --- Auto Bridge Logic ---
           if (config.bridge && config.bridge.enabled && config.bridge.auto) {
              resultManifold = applyAutoBridge(resultManifold, m);
           }
@@ -361,14 +370,13 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           if (width > 0.001) {
              const centerX = currentXOffset + (width / 2);
              
-             // --- Apply Intersection Config Transforms ---
-             const sX = config.transform.scaleX || 1;
-             const sY = config.transform.scaleY || 1;
-             const dX = config.transform.moveX || 0;
-             const dZ = config.transform.moveZ || 0;
+             // --- Apply Result Pair Positioning ---
+             const pX = config.pairSpacing.x || 0;
+             const pZ = config.pairSpacing.z || 0;
              
-             let transformed = resultManifold.scale([sX, sY, 1]); 
-             const finalPos = transformed.translate([centerX + dX, 0, dZ]);
+             // We no longer scale the result here unless we add a pairScale later.
+             // Translation handles kerning/centering of the illusion block.
+             const finalPos = resultManifold.translate([centerX + pX, 0, pZ]);
              parts.push(finalPos);
 
              // --- Manual Connector Bridge ---
@@ -381,7 +389,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                          bridge.delete();
                          bridge = rotated;
                      }
-                     const positionedBridge = bridge.translate([centerX + dX + bx, by, dZ + bz]);
+                     const positionedBridge = bridge.translate([centerX + pX + bx, by, pZ + bz]);
                      parts.push(positionedBridge);
                      bridge.delete();
                  } catch (e) {
@@ -397,22 +405,17 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                  const supportGeom = createSupportPrimitive(m, supp.type, h, w);
                  if (supportGeom) {
                      const rotated = supportGeom.rotate([-90, 0, 0]);
-                     
-                     // Determine embed depth (local vs global)
                      const activeEmbedDepth = config.embedDepth ?? globalEmbedDepth;
                      const baseBottomY = (baseHeight > 0) ? (activeEmbedDepth - baseHeight) : 0;
-                     
                      const shiftY = baseBottomY + (h / 2);
-                     const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
+                     const positioned = rotated.translate([centerX + pX, shiftY, pZ]);
                      parts.push(positioned);
                      if (supportGeom !== rotated) supportGeom.delete();
                      if (rotated !== positioned) rotated.delete();
                  }
              }
              
-             // Cleanup Intermediates for Letter
-             if (transformed !== resultManifold) resultManifold.delete();
-             if (finalPos !== transformed) transformed.delete();
+             if (finalPos !== resultManifold) resultManifold.delete();
 
              currentXOffset += width + gap;
           } else {
@@ -464,12 +467,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         if (baseManifoldRaw) {
             const baseRotated = baseManifoldRaw.rotate([-90, 0, 0]);
             baseManifoldRaw.delete();
-            
-            // Note: Base vertical position depends on the "Deepest" embed depth? 
-            // Standard approach: Base is generated relative to global or lowest point. 
-            // Simplified: Use global embed depth for base placement or 0.
             const yOffset = globalEmbedDepth - baseHeight;
-            
             const baseFinal = baseRotated.translate([center.x, yOffset, center.z]);
             baseRotated.delete();
             parts.push(baseFinal);
@@ -482,12 +480,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   // --- 3. Final Union & Cleanup ---
   try {
       const finalManifold = m.Manifold.union(parts);
-      
-      for (const p of parts) {
-          if (p && typeof p.delete === 'function') p.delete();
-      }
-
-      // 4. Remove Floating Parts
+      for (const p of parts) { if (p && typeof p.delete === 'function') p.delete(); }
       let cleanManifold = finalManifold;
 
       if (baseHeight > 0) {
@@ -499,7 +492,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
               const kept = [];
               const b = finalManifold.boundingBox();
               const minY = b.min[1];
-              // Keep parts that touch the lowest point
               const threshold = minY + 0.2;
 
               for (let i = 0; i < count; i++) {

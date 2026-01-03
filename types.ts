@@ -1,11 +1,12 @@
+
 export type BaseType = 'RECTANGLE' | 'OVAL';
 export type SupportType = 'CYLINDER' | 'SQUARE';
 
-export interface TransformSettings {
+export interface CharTransform {
   scaleX: number;
   scaleY: number; 
   moveX: number;
-  moveZ: number; 
+  moveY: number; 
 }
 
 export interface IndividualSupportSettings {
@@ -13,7 +14,6 @@ export interface IndividualSupportSettings {
   type: SupportType;
   height: number;
   width: number;
-  // removed sliceHeight
 }
 
 export interface BridgeSettings {
@@ -38,10 +38,13 @@ export interface IntersectionConfig {
   char2FontUrl?: string; // Specific font for char 2
   
   embedDepth?: number;
-  char1Width?: number; // Scale width of char 1
-  char2Width?: number; // Scale width of char 2
   
-  transform: TransformSettings;
+  char1Transform: CharTransform;
+  char2Transform: CharTransform;
+  
+  // Positioning the result pair
+  pairSpacing: { x: number; z: number };
+
   support: IndividualSupportSettings;
   bridge: BridgeSettings;
   isOverridden: boolean;

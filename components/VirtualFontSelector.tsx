@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FontLibrary, FontVariant } from '../types';
 
@@ -12,8 +13,30 @@ interface VirtualFontSelectorProps {
 // Global cache to prevent reloading same fonts during scrolling
 const loadedFonts = new Set<string>();
 const loadingFonts = new Map<string, Promise<void>>();
+const parsedFonts = new Map<string, any>(); // Cache for OpenType font objects
+// Cache for validated preview strings per font + text
+const glyphCheckCache = new Map<string, string>();
 
-// Virtual Font Row Component
+// Helper to check glyphs against a parsed font
+const checkGlyphs = (otFont: any, text: string): string => {
+    if (!otFont) return text;
+    try {
+        const uniqueChars = Array.from(new Set([...text]));
+        const missing = new Set();
+        uniqueChars.forEach(char => {
+            const glyph = otFont.charToGlyph(char);
+            // .notdef is typically index 0 or named .notdef
+            if (glyph.index === 0 || glyph.name === '.notdef') {
+                missing.add(char);
+            }
+        });
+        return text.split('').map(c => missing.has(c) ? '?' : c).join('');
+    } catch (e) {
+        return text;
+    }
+};
+
+// Font Row Component
 const FontRow = ({ 
     style, 
     family, 
@@ -30,41 +53,82 @@ const FontRow = ({
     previewText: string
 }) => {
     const variant = variants[0];
-    // Create a unique font-family name for this session
-    const fontName = `Preview_${family.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const uniqueId = family.replace(/[^a-zA-Z0-9]/g, '');
+    const fontName = `Preview_${uniqueId}`;
+    // Include previewText in cache key to handle different texts for same font
+    const cacheKey = `${fontName}::${previewText}`; 
+    
     const [isLoaded, setIsLoaded] = useState(loadedFonts.has(fontName));
+    const [validatedText, setValidatedText] = useState(() => {
+        return glyphCheckCache.get(cacheKey) || previewText;
+    });
 
     useEffect(() => {
-        if (isLoaded) return;
-
-        // Double check if loaded by another row in the meantime
-        if (loadedFonts.has(fontName)) {
-            setIsLoaded(true);
-            return;
+        // If result is already cached, update immediately
+        if (glyphCheckCache.has(cacheKey)) {
+            setValidatedText(glyphCheckCache.get(cacheKey)!);
+        } else if (parsedFonts.has(fontName)) {
+            // If font is parsed but this specific text result isn't cached, check now
+            const checked = checkGlyphs(parsedFonts.get(fontName), previewText);
+            glyphCheckCache.set(cacheKey, checked);
+            setValidatedText(checked);
+        } else {
+            // Fallback while loading
+            setValidatedText(previewText);
         }
+    }, [previewText, cacheKey, fontName]);
+
+    useEffect(() => {
+        if (isLoaded && glyphCheckCache.has(cacheKey)) return;
 
         let mounted = true;
 
-        if (!loadingFonts.has(fontName)) {
-            const load = async () => {
-                try {
-                    const font = new FontFace(fontName, `url(${variant.url})`);
-                    await font.load();
-                    document.fonts.add(font);
-                    loadedFonts.add(fontName);
-                } catch (e) {
-                    console.warn(`Failed to load preview font ${fontName}`, e);
-                }
-            };
-            loadingFonts.set(fontName, load());
-        }
+        const loadFont = async () => {
+            // If completely new font, fetch and parse
+            if (!loadingFonts.has(fontName)) {
+                const loadTask = async () => {
+                    try {
+                        const response = await fetch(variant.url);
+                        const buffer = await response.arrayBuffer();
+                        
+                        // 1. Register for CSS usage
+                        const font = new FontFace(fontName, buffer);
+                        await font.load();
+                        document.fonts.add(font);
+                        loadedFonts.add(fontName);
 
-        loadingFonts.get(fontName)?.then(() => {
-            if (mounted) setIsLoaded(true);
-        });
+                        // 2. Parse with OpenType to check glyphs
+                        // @ts-ignore
+                        if (window.opentype) {
+                            // @ts-ignore
+                            const otFont = window.opentype.parse(buffer);
+                            parsedFonts.set(fontName, otFont);
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to load preview font ${fontName}`, e);
+                    }
+                };
+                loadingFonts.set(fontName, loadTask());
+            }
+
+            // Wait for load to finish (whether it was us or someone else)
+            await loadingFonts.get(fontName);
+
+            if (mounted) {
+                setIsLoaded(true);
+                // Perform check if not done yet
+                if (!glyphCheckCache.has(cacheKey) && parsedFonts.has(fontName)) {
+                    const checked = checkGlyphs(parsedFonts.get(fontName), previewText);
+                    glyphCheckCache.set(cacheKey, checked);
+                    setValidatedText(checked);
+                }
+            }
+        };
+
+        loadFont();
 
         return () => { mounted = false; };
-    }, [fontName, variant.url, isLoaded]);
+    }, [fontName, variant.url, previewText, cacheKey, isLoaded]);
 
     const fontStyle = { fontFamily: isLoaded ? `"${fontName}", sans-serif` : 'sans-serif' };
 
@@ -79,10 +143,9 @@ const FontRow = ({
                     className="text-xl text-white truncate leading-none"
                     style={fontStyle}
                 >
-                    {previewText}
+                    {validatedText}
                 </span>
             </div>
-            {/* Show family name in the font itself if loaded, otherwise generic */}
             <span 
                 className="text-[10px] text-gray-400 uppercase mt-1 tracking-wide truncate opacity-80"
                 style={fontStyle}
@@ -108,14 +171,12 @@ export const VirtualFontSelector: React.FC<VirtualFontSelectorProps> = ({
     const [scrollTop, setScrollTop] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Filter families based on search input
     const filteredFamilies = useMemo(() => {
         if (!filter) return families;
         const lower = filter.toLowerCase();
         return families.filter(fam => fam.toLowerCase().includes(lower));
     }, [families, filter]);
 
-    // Close on click outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -126,19 +187,14 @@ export const VirtualFontSelector: React.FC<VirtualFontSelectorProps> = ({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Focus input when opened
     useEffect(() => {
         if (isOpen) {
             setTimeout(() => {
                 if (inputRef.current) inputRef.current.focus();
             }, 50);
-        } else {
-            // Reset filter when closed? Maybe better to keep it?
-            // setFilter(""); 
         }
     }, [isOpen]);
 
-    // Virtualization constants
     const itemHeight = 64; 
     const containerHeight = 300;
     const totalHeight = filteredFamilies.length * itemHeight;
