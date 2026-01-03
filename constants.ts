@@ -48,8 +48,8 @@ export const getFontLibrary = (): FontLibrary => {
 };
 
 const library = getFontLibrary();
-const defaultFamily = 'Abhaya Libre'; 
-const defaultUrl = library[defaultFamily]?.[0]?.url || library['Roboto']?.[0]?.url;
+const defaultFamily = 'IBMPlex sans jp'; 
+const defaultUrl = library[defaultFamily]?.[1]?.url || library['Roboto']?.[0]?.url;
 
 export const DEFAULT_SETTINGS: TextSettings = {
   text1: '♥YE♥',
