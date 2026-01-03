@@ -10,6 +10,7 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<TextSettings>(DEFAULT_SETTINGS);
   const [generatedGeometry, setGeneratedGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Ref to track timeout for debounce
   const generateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -30,20 +31,26 @@ const App: React.FC = () => {
         clearTimeout(generateTimeoutRef.current);
     }
     
-    // 2. Set generating state (used to show spinner in button or loading state)
-    // Note: We don't set isGenerating=true immediately to avoid flashing spinner on every keystroke.
-    // We can set a local "dirty" state if we wanted to show "changes pending".
-    
-    // 3. Schedule generation
+    // 2. Schedule generation
     generateTimeoutRef.current = setTimeout(async () => {
         setIsGenerating(true);
+        setError(null); // Clear previous errors
         try {
             // Small yield to let UI render the spinner
             await new Promise(r => setTimeout(r, 50));
             const geom = await generateDualTextGeometry(settings);
-            setGeneratedGeometry(geom);
-        } catch (error) {
-            console.error("Generation failed:", error);
+            
+            if (!geom) {
+                // If geom is null but no error was thrown, it usually means empty input or no intersection
+                // We don't necessarily treat it as a crash, but we clear the result.
+                setGeneratedGeometry(null);
+            } else {
+                setGeneratedGeometry(geom);
+            }
+        } catch (err: any) {
+            console.error("Generation failed:", err);
+            setError(err.message || "An unexpected error occurred during generation.");
+            setGeneratedGeometry(null);
         } finally {
             setIsGenerating(false);
         }
@@ -65,28 +72,6 @@ const App: React.FC = () => {
     const filename = `TextTango_${settings.text1}_${settings.text2}`;
     exportToSTL(generatedGeometry, filename);
   };
-
-  // Determine what to show. 
-  // If we are generating, keep showing old result (if any) or Preview? 
-  // Actually, usually you want to see the Preview while editing, then Result when done.
-  // The 'isGenerating' flag is true only during the actual computation.
-  // We can infer "Preview Mode" if user is typing (debounce active). 
-  // But reacting to debounce active state is tricky with just refs.
-  // For simplicity: Scene always renders Preview. It overlays Result if `generatedGeometry` exists AND `!isGenerating`.
-  // Actually, if settings changed, `generatedGeometry` is stale compared to settings.
-  // We can just rely on `isGenerating` to show a loader overlay.
-  
-  // Better UX: Show Preview (ghost) always. Show Result on top when valid. 
-  // When settings change, we can hide Result immediately?
-  // Let's hide Result immediately on settings change? 
-  // No, that causes flickering.
-  // Let's just track if settings match geometry? Too complex.
-  // Let's just show Preview while debouncing.
-  
-  // Simplified:
-  // We use `isGenerating` to show status. 
-  // `ViewMode` is effectively always handled by Scene: 
-  // Scene renders Preview (ghost inputs). Scene renders Result (solid) if passed.
   
   return (
     <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden">
@@ -99,18 +84,36 @@ const App: React.FC = () => {
         fontLibrary={fontLibrary}
       />
 
-      <main className="flex-1 relative">
+      <main className="flex-1 relative bg-gray-900">
         <Scene 
             settings={settings}
-            generatedGeometry={isGenerating ? null : generatedGeometry} // Hide stale geometry during regen? Or keep it? keeping it might be confusing if mismatch. Let's hide it to show Preview.
+            generatedGeometry={isGenerating ? null : generatedGeometry} 
             mode={isGenerating || !generatedGeometry ? ViewMode.PREVIEW : ViewMode.RESULT}
         />
         
+        {/* Loading Indicator */}
         {isGenerating && (
              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg flex items-center gap-3 z-20 animate-pulse">
                 <i className="fas fa-cog fa-spin"></i>
                 <span className="font-semibold text-sm">Generating Model...</span>
              </div>
+        )}
+
+        {/* Error Message Display */}
+        {error && !isGenerating && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-900/90 border border-red-500 text-white px-6 py-4 rounded-lg shadow-xl z-30 max-w-lg flex flex-col gap-2">
+                <div className="flex items-center gap-3 text-red-300 font-bold">
+                    <i className="fas fa-exclamation-circle text-xl"></i>
+                    <span>Generation Failed</span>
+                </div>
+                <p className="text-sm opacity-90">{error}</p>
+                <button 
+                    onClick={() => setError(null)}
+                    className="self-end text-xs text-red-300 hover:text-white underline mt-1"
+                >
+                    Dismiss
+                </button>
+            </div>
         )}
       </main>
     </div>

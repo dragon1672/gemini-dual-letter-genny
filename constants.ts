@@ -58,8 +58,8 @@ const defaultFamily = 'IBMPlex Sans JP';
 const defaultUrl = library[defaultFamily]?.[1]?.url || library['Roboto']?.[0]?.url;
 
 export const DEFAULT_SETTINGS = {
-  text1: 'YES♥\u03A9',
-  text2: 'NO!♥\u03A9',
+  text1: 'YES',
+  text2: 'NO',
   fontUrl: defaultUrl, 
   fontSize: 20,
   spacing: 0.15, 
