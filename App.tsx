@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import Controls from './components/Controls';
+import AdvancedControls from './components/AdvancedControls';
 import Scene from './components/Scene';
-import { TextSettings, ViewMode } from './types';
+import { TextSettings, ViewMode, IntersectionConfig } from './types';
 import { DEFAULT_SETTINGS, getFontLibrary } from './constants';
 import { generateDualTextGeometry, exportToSTL, loadFont } from './services/geometryService';
 
@@ -11,10 +12,9 @@ const App: React.FC = () => {
   const [generatedGeometry, setGeneratedGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   
-  // Ref to track timeout for debounce
   const generateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
   const fontLibrary = useMemo(() => getFontLibrary(), []);
 
   // Preload default font
@@ -24,28 +24,85 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Sync Text Inputs to Intersection Config
+  useEffect(() => {
+    setSettings(prev => {
+        const t1Chars = [...prev.text1];
+        const t2Chars = [...prev.text2];
+        const len = Math.max(t1Chars.length, t2Chars.length);
+        
+        let newConfig = [...prev.intersectionConfig];
+        
+        // 1. Resize if needed
+        if (newConfig.length !== len) {
+            if (len > newConfig.length) {
+                for (let i = newConfig.length; i < len; i++) {
+                    newConfig.push({
+                        id: `${Math.random().toString(36).substr(2, 9)}`,
+                        char1: t1Chars[i] || '',
+                        char2: t2Chars[i] || '',
+                        isOverridden: false,
+                        transform: { scaleX: 1, scaleY: 1, moveX: 0, moveZ: 0 },
+                        support: { 
+                            enabled: prev.supportEnabled, 
+                            type: prev.supportType, 
+                            height: prev.supportHeight, 
+                            width: prev.supportRadius 
+                        }
+                    });
+                }
+            } else {
+                newConfig = newConfig.slice(0, len);
+            }
+        }
+
+        // 2. Update chars and sync defaults
+        const updated = newConfig.map((conf, i) => {
+             const c1 = t1Chars[i] || '';
+             const c2 = t2Chars[i] || '';
+             
+             let next = { ...conf, char1: c1, char2: c2 };
+             
+             if (!next.isOverridden) {
+                 next.support = {
+                     enabled: prev.supportEnabled,
+                     type: prev.supportType,
+                     height: prev.supportHeight,
+                     width: prev.supportRadius
+                 };
+             }
+             return next;
+        });
+        
+        // Deep compare roughly
+        if (JSON.stringify(updated) !== JSON.stringify(prev.intersectionConfig)) {
+            return { ...prev, intersectionConfig: updated };
+        }
+        
+        return prev;
+    });
+  }, [
+      settings.text1, settings.text2, 
+      settings.supportEnabled, settings.supportType, settings.supportHeight, settings.supportRadius
+  ]);
+
+
   // Auto-generation effect
   useEffect(() => {
-    // 1. Cancel previous pending generation
     if (generateTimeoutRef.current) {
         clearTimeout(generateTimeoutRef.current);
     }
     
-    // 2. Schedule generation
     generateTimeoutRef.current = setTimeout(async () => {
         setIsGenerating(true);
-        setError(null); // Clear previous errors
+        setError(null); 
         try {
-            // Small yield to let UI render the spinner
             await new Promise(r => setTimeout(r, 50));
-            const geom = await generateDualTextGeometry(settings);
             
-            if (!geom) {
-                // If geom is null but no error was thrown, it usually means empty input or no intersection
-                // We don't necessarily treat it as a crash, but we clear the result.
-                setGeneratedGeometry(null);
-            } else {
-                setGeneratedGeometry(geom);
+            // Only generate if we have configs
+            if (settings.intersectionConfig.length > 0) {
+                const geom = await generateDualTextGeometry(settings);
+                setGeneratedGeometry(geom || null);
             }
         } catch (err: any) {
             console.error("Generation failed:", err);
@@ -54,18 +111,12 @@ const App: React.FC = () => {
         } finally {
             setIsGenerating(false);
         }
-    }, 1500); // 1.5s delay after last change
+    }, 1000); 
 
     return () => {
         if (generateTimeoutRef.current) clearTimeout(generateTimeoutRef.current);
     };
-  }, [
-      settings.text1, settings.text2, 
-      settings.fontSize, settings.spacing, 
-      settings.baseHeight, settings.basePadding, settings.baseType, settings.baseCornerRadius, settings.baseTopRounding,
-      settings.fontUrl, 
-      settings.supportEnabled, settings.supportHeight, settings.supportRadius, settings.supportMask
-  ]);
+  }, [settings]); 
 
   const handleDownload = () => {
     if (!generatedGeometry) return;
@@ -74,7 +125,7 @@ const App: React.FC = () => {
   };
   
   return (
-    <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden bg-gray-900">
       <Controls 
         settings={settings}
         setSettings={setSettings}
@@ -82,9 +133,15 @@ const App: React.FC = () => {
         isGenerating={isGenerating}
         hasResult={!!generatedGeometry}
         fontLibrary={fontLibrary}
+        showAdvanced={showAdvanced}
+        toggleAdvanced={() => setShowAdvanced(!showAdvanced)}
       />
 
-      <main className="flex-1 relative bg-gray-900">
+      {showAdvanced && (
+          <AdvancedControls settings={settings} setSettings={setSettings} />
+      )}
+
+      <main className="flex-1 relative bg-gray-900 min-w-0">
         <Scene 
             settings={settings}
             generatedGeometry={isGenerating ? null : generatedGeometry} 
@@ -93,7 +150,7 @@ const App: React.FC = () => {
         
         {/* Loading Indicator */}
         {isGenerating && (
-             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg flex items-center gap-3 z-20 animate-pulse">
+             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-2 rounded-full shadow-lg flex items-center gap-3 z-20 animate-pulse pointer-events-none">
                 <i className="fas fa-cog fa-spin"></i>
                 <span className="font-semibold text-sm">Generating Model...</span>
              </div>

@@ -1,4 +1,4 @@
-import { FontLibrary, BaseType } from './types';
+import { FontLibrary, BaseType, SupportType, TextSettings } from './types';
 import { BASE_URL, RAW_FONT_PATHS } from './font_constants';
 
 export const getFontLibrary = (): FontLibrary => {
@@ -6,7 +6,6 @@ export const getFontLibrary = (): FontLibrary => {
 
     RAW_FONT_PATHS.forEach(path => {
         const filename = path.split('/').pop() || "";
-        // Remove .ttf and brackets for name processing
         let namePart = filename.replace(/\.ttf$/, "");
         const isVariable = namePart.includes("[");
         namePart = namePart.replace(/\[.*?\]/, ""); 
@@ -18,10 +17,7 @@ export const getFontLibrary = (): FontLibrary => {
         if (isVariable && variant === "Regular") variant = "Variable";
         if (isVariable && variant !== "Variable") variant = `${variant} (Variable)`;
 
-        // Add spaces to CamelCase family names (e.g. OpenSans -> Open Sans)
         family = family.replace(/([a-z])([A-Z])/g, '$1 $2');
-        
-        // Add spaces to CamelCase variants
         variant = variant.replace(/([a-z])([A-Z])/g, '$1 $2');
 
         if (!library[family]) library[family] = [];
@@ -31,10 +27,8 @@ export const getFontLibrary = (): FontLibrary => {
         });
     });
 
-    // Sort Library keys alphabetical
     const sortedLibrary: FontLibrary = {};
     Object.keys(library).sort().forEach(key => {
-        // Sort variants: Regular/Variable first, then alphabetical
         const variants = library[key].sort((a, b) => {
              const getScore = (name: string) => {
                  if (name.includes('Regular') || name.includes('Variable')) return -1;
@@ -52,12 +46,11 @@ export const getFontLibrary = (): FontLibrary => {
     return sortedLibrary;
 };
 
-// Default setup
 const library = getFontLibrary();
 const defaultFamily = 'IBMPlex Sans JP';
 const defaultUrl = library[defaultFamily]?.[1]?.url || library['Roboto']?.[0]?.url;
 
-export const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS: TextSettings = {
   text1: 'YES',
   text2: 'NO',
   fontUrl: defaultUrl, 
@@ -68,8 +61,12 @@ export const DEFAULT_SETTINGS = {
   baseType: 'RECTANGLE' as BaseType,
   baseCornerRadius: 4,
   baseTopRounding: 0.5,
+  embedDepth: 0.5,
+  
   supportEnabled: false,
-  supportMask: '',
-  supportHeight: 5,
-  supportRadius: 3,
+  supportType: 'CYLINDER' as SupportType,
+  supportHeight: 2.5, 
+  supportRadius: 1.5,
+
+  intersectionConfig: []
 };

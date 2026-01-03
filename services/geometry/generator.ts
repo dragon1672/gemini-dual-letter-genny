@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TextSettings } from '../../types';
+import { TextSettings, SupportType } from '../../types';
 import { loadFont } from './text';
 import { getManifold } from './loader';
 import { fromManifold } from './converters';
@@ -47,12 +47,10 @@ const processPoints = (points: number[][], desiredCCW: boolean): number[][] => {
 // Helper to convert THREE.Shape[] to Manifold
 const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
     const loops: number[][][] = [];
-    const resolution = 16; // Increased resolution for smoother bases and text
+    const resolution = 16; 
 
     shapes.forEach(shape => {
         const points = shape.getPoints(resolution).map(p => [p.x, p.y]);
-        
-        // Ensure closed loop
         if (points.length > 0) {
             const first = points[0];
             const last = points[points.length - 1];
@@ -60,16 +58,13 @@ const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
                 points.pop();
             }
         }
-
         const cleaned = cleanPoints(points);
         if (cleaned.length >= 3) {
-            // Outer shape should be CCW
             loops.push(processPoints(cleaned, true));
         }
 
         shape.holes.forEach(hole => {
             const holePoints = hole.getPoints(resolution).map(p => [p.x, p.y]);
-            
             if (holePoints.length > 0) {
                 const first = holePoints[0];
                 const last = holePoints[holePoints.length - 1];
@@ -77,10 +72,8 @@ const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
                     holePoints.pop();
                 }
             }
-
             const cleanedHole = cleanPoints(holePoints);
             if (cleanedHole.length >= 3) {
-                // Holes should be CW
                 loops.push(processPoints(cleanedHole, false));
             }
         });
@@ -94,22 +87,15 @@ const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
         cs = new m.CrossSection(loops, fillRule);
         
         let manifold = null;
-
-        // Try static extrude (newer API)
         if (m.Manifold && typeof m.Manifold.extrude === 'function') {
             manifold = m.Manifold.extrude(cs, depth);
-        }
-        // Try instance extrude (older/alternative API)
-        else if (cs && typeof cs.extrude === 'function') {
+        } else if (cs && typeof cs.extrude === 'function') {
             manifold = cs.extrude(depth);
-        }
-        // Try generic module extrude
-        else if (typeof m.extrude === 'function') {
+        } else if (typeof m.extrude === 'function') {
             manifold = m.extrude(cs, depth);
         } else {
             throw new Error("Extrude function not found in Manifold API");
         }
-
         return manifold;
     } catch (e: any) {
         console.error("Manifold conversion/extrusion failed:", e);
@@ -119,6 +105,30 @@ const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
             cs.delete();
         }
     }
+};
+
+const createSupportPrimitive = (m: any, type: SupportType, height: number, size: number) => {
+    try {
+        // We always return a primitive centered at (0,0,0) extending along Z from -height/2 to height/2
+        // This ensures consistent rotation logic downstream.
+        
+        if (type === 'CYLINDER') {
+            if (m.Manifold && typeof m.Manifold.cylinder === 'function') {
+                return m.Manifold.cylinder(height, size, size, 16, true);
+            } else if (typeof m.cylinder === 'function') {
+                return m.cylinder(height, size, size, 16, true);
+            }
+        } else if (type === 'SQUARE') {
+            if (m.Manifold && typeof m.Manifold.cube === 'function') {
+                return m.Manifold.cube([size * 2, size * 2, height], true);
+            } else if (typeof m.cube === 'function') {
+                return m.cube([size * 2, size * 2, height], true);
+            }
+        }
+    } catch (e) {
+        console.warn("Primitive creation failed", e);
+    }
+    return null;
 };
 
 export const generateDualTextGeometry = async (settings: TextSettings): Promise<THREE.BufferGeometry | null> => {
@@ -132,25 +142,17 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   if (!m) throw new Error("Could not initialize Geometry Engine (Manifold).");
 
   const { 
-    text1, 
-    text2, 
+    intersectionConfig, 
     fontSize, 
     spacing, 
     baseHeight, 
     basePadding,
     baseType, 
     baseCornerRadius, 
-    baseTopRounding,
-    supportEnabled,
-    supportMask,
-    supportHeight,
-    supportRadius
+    embedDepth
   } = settings;
 
-  const t1Chars = [...text1];
-  const t2Chars = [...text2];
-  const length = Math.min(t1Chars.length, t2Chars.length);
-
+  const length = intersectionConfig.length;
   const gap = fontSize * spacing;
   const extrusionDepth = fontSize * 5; 
 
@@ -160,8 +162,9 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 
   // --- 1. Generate Letter Intersections ---
   for (let i = 0; i < length; i++) {
-      const char1 = t1Chars[i];
-      const char2 = t2Chars[i];
+      const config = intersectionConfig[i];
+      const char1 = config.char1;
+      const char2 = config.char2;
       const isC1Space = char1.trim() === '';
       const isC2Space = char2.trim() === '';
 
@@ -190,7 +193,9 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                 const bottomY = b.min[1];
                 const centerZ = (b.max[2] + b.min[2]) / 2;
                 
+                // Center and sit on Y=0
                 const centered = raw.translate([-centerX, -bottomY, -centerZ]);
+                
                 m1 = centered.rotate([0, 45, 0]); 
                 
                 raw.delete();
@@ -220,7 +225,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       if (m1 && m2) {
           try {
               resultManifold = m1.intersect(m2);
-              
               if (resultManifold) {
                    const b = resultManifold.boundingBox();
                    if ((b.max[0] - b.min[0]) < 0.001 || (b.max[1] - b.min[1]) < 0.001) {
@@ -229,7 +233,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                    }
               }
           } catch (e) {
-              console.warn(`Intersection failed for chars ${char1}/${char2}`, e);
               resultManifold = null;
           }
       } else {
@@ -252,28 +255,64 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           if (width > 0.001) {
              const centerX = currentXOffset + (width / 2);
              
-             const finalPos = resultManifold.translate([centerX, 0, 0]);
-             resultManifold.delete(); 
+             // --- Apply Intersection Config Transforms ---
+             // Scale
+             const sX = config.transform.scaleX || 1;
+             const sY = config.transform.scaleY || 1;
              
+             // Move
+             const dX = config.transform.moveX || 0;
+             const dZ = config.transform.moveZ || 0;
+             
+             // Scale transformation
+             let transformed = resultManifold.scale([sX, sY, 1]); 
+             
+             // Translate transformation
+             const finalPos = transformed.translate([centerX + dX, 0, dZ]);
              parts.push(finalPos);
 
              // --- Supports ---
-             if (supportEnabled) {
-                const maskChar = (i < supportMask.length) ? supportMask[i] : '_';
-                if (maskChar !== '_' && maskChar !== ' ') {
-                    try {
-                        const cyl = m.cylinder(supportHeight, supportRadius, supportRadius, 16, false);
-                        const rotated = cyl.rotate([-90, 0, 0]);
-                        const positioned = rotated.translate([centerX, 0, 0]);
-                        parts.push(positioned);
-                        
-                        cyl.delete();
-                        rotated.delete();
-                    } catch(e) {
-                        console.warn("Support generation failed", e);
-                    }
-                }
+             const supp = config.support;
+             if (supp && supp.enabled) {
+                 const h = supp.height;
+                 const w = supp.width;
+                 
+                 const supportGeom = createSupportPrimitive(m, supp.type, h, w);
+                 
+                 if (supportGeom) {
+                     // 1. Initially centered at (0,0,0) in Z [-h/2, h/2]
+                     // 2. Rotate to Y axis [-90, 0, 0] -> Y [-h/2, h/2]
+                     const rotated = supportGeom.rotate([-90, 0, 0]);
+                     
+                     // 3. Positioning
+                     // We want the support to start at the bottom of the base (print bed anchor)
+                     // and go upwards by 'height'.
+                     
+                     // Calculate Base Bottom Y
+                     // Base Top is at 'embedDepth'. 
+                     // Base Bottom is 'embedDepth - baseHeight'.
+                     const baseBottomY = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
+                     
+                     // We want the support Y range to be [baseBottomY, baseBottomY + h].
+                     // Currently 'rotated' Y range is [-h/2, h/2].
+                     // Target Center = baseBottomY + h/2.
+                     // Shift = Target Center - (Current Center 0) = baseBottomY + h/2.
+                     
+                     const shiftY = baseBottomY + (h / 2);
+                     
+                     const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
+                     
+                     parts.push(positioned);
+                     
+                     // Clean up intermediates
+                     if (supportGeom !== rotated) supportGeom.delete();
+                     if (rotated !== positioned) rotated.delete();
+                 }
              }
+             
+             // Cleanup Intermediates for Letter
+             if (transformed !== resultManifold) resultManifold.delete();
+             if (finalPos !== transformed) transformed.delete();
 
              currentXOffset += width + gap;
           } else {
@@ -286,18 +325,16 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   }
 
   if (parts.length === 0) {
-      throw new Error("No printable 3D geometry could be generated. This usually means the selected font does not support the characters entered, or the intersection of the two text strings resulted in empty space (common with very thin fonts). Please try a bolder font or different text.");
+      throw new Error("No printable 3D geometry could be generated.");
   }
 
   // --- 2. Create Base ---
   if (baseHeight > 0) {
       try {
-        // Union parts momentarily just to get the bounding box size
         const lettersUnion = m.Manifold.union(parts);
         const b = lettersUnion.boundingBox();
         const fullSize = { x: b.max[0] - b.min[0], z: b.max[2] - b.min[2] };
         const center = { x: (b.max[0] + b.min[0]) / 2, z: (b.max[2] + b.min[2]) / 2 };
-        
         lettersUnion.delete(); 
 
         const width = fullSize.x + basePadding;
@@ -307,7 +344,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         const x = -width / 2;
         const y = -depth / 2;
         
-        // Draw the base profile 2D
         if (baseType === 'RECTANGLE') {
             const r = Math.min(baseCornerRadius, width/2, depth/2);
             shape.moveTo(x + r, y);
@@ -323,20 +359,16 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
             shape.absellipse(0, 0, width / 2, depth / 2, 0, Math.PI * 2, false, 0);
         }
 
-        // Generate base directly in Manifold using the same logic as text
         const baseManifoldRaw = shapesToManifold([shape], m, baseHeight);
         
         if (baseManifoldRaw) {
-            // Extrusion happens in Z. We need it to stand up (Y-up)
-            // Rotate X -90
             const baseRotated = baseManifoldRaw.rotate([-90, 0, 0]);
             baseManifoldRaw.delete();
 
-            // Calculate overlap position.
-            // Text sits at approx Y=0 (baseline). 
-            // We want the base to sit below the text, with a slight overlap to fuse them.
-            const overlap = 0.5;
-            const yOffset = overlap - baseHeight;
+            // Base Top Target: Y=embedDepth
+            // Base Height: baseHeight
+            // Shift = embedDepth - baseHeight
+            const yOffset = embedDepth - baseHeight;
             
             const baseFinal = baseRotated.translate([center.x, yOffset, center.z]);
             baseRotated.delete();
@@ -352,20 +384,15 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   try {
       const finalManifold = m.Manifold.union(parts);
       
-      // Cleanup Input Parts
       for (const p of parts) {
           if (p && typeof p.delete === 'function') p.delete();
       }
 
-      // 4. Remove Floating Parts (if base exists)
-      // This prevents "floating cantilever" errors in slicers by removing 
-      // disconnected islands that don't touch the base.
+      // 4. Remove Floating Parts
       let cleanManifold = finalManifold;
 
       if (baseHeight > 0) {
           const components = finalManifold.decompose();
-          
-          // Determine if components is Array (newer versions) or Vector (older)
           const isArray = Array.isArray(components);
           const count = isArray ? components.length : components.size();
           
@@ -373,50 +400,37 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
               const kept = [];
               const b = finalManifold.boundingBox();
               const minY = b.min[1];
-              
-              // We check if components touch the bottom area.
-              // base sits at [overlap - baseHeight] up to [overlap].
-              // The lowest point is roughly (overlap - baseHeight).
-              // We add a tolerance of 0.2.
+              // Keep parts that touch the lowest point
               const threshold = minY + 0.2;
 
               for (let i = 0; i < count; i++) {
                   const comp = isArray ? components[i] : components.get(i);
                   const cb = comp.boundingBox();
-                  
                   if (cb.min[1] <= threshold) {
                       kept.push(comp);
                   } else {
-                      // Delete disconnected floating part
                       comp.delete();
                   }
               }
               
-              // If we filtered anything out, re-union
               if (kept.length < count) {
                   if (kept.length > 0) {
                       cleanManifold = m.Manifold.union(kept);
-                      // Cleanup kept intermediates
                       kept.forEach(k => k.delete());
-                      finalManifold.delete(); // Delete original dirty one
+                      finalManifold.delete();
                   } else {
-                      // If we somehow filtered everything, keep original (fallback)
-                      // Clean up kept (empty) to be safe
                       kept.forEach(k => k.delete());
                       cleanManifold = finalManifold;
                   }
               } else {
-                  // Kept everything, just clean up references
                   kept.forEach(k => k.delete());
                   cleanManifold = finalManifold;
               }
           }
-          // Explicitly delete the vector container (Manifold C++ binding) if it's not a JS array
           if (!isArray && components.delete) components.delete();
       }
 
       const resultGeom = fromManifold(cleanManifold, m);
-      
       cleanManifold.delete();
 
       resultGeom.computeBoundingBox();

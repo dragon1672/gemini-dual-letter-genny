@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { TextSettings, FontLibrary, FontVariant } from '../types';
+import { TextSettings, FontLibrary, FontVariant, SupportType } from '../types';
 
 interface ControlsProps {
   settings: TextSettings;
@@ -8,6 +8,8 @@ interface ControlsProps {
   isGenerating: boolean;
   hasResult: boolean;
   fontLibrary: FontLibrary;
+  showAdvanced: boolean;
+  toggleAdvanced: () => void;
 }
 
 const Controls: React.FC<ControlsProps> = ({
@@ -17,6 +19,8 @@ const Controls: React.FC<ControlsProps> = ({
   isGenerating,
   hasResult,
   fontLibrary,
+  showAdvanced,
+  toggleAdvanced
 }) => {
   const handleChange = <K extends keyof TextSettings>(key: K, value: TextSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -52,24 +56,16 @@ const Controls: React.FC<ControlsProps> = ({
       }
   };
 
-  useEffect(() => {
-     if (settings.supportEnabled && settings.supportMask.length === 0) {
-         const len = Math.max(text1Len, text2Len);
-         const defaultMask = Array(len).fill('_').join('');
-         handleChange('supportMask', defaultMask);
-     }
-  }, [settings.supportEnabled]);
-
   const availableVariants = fontLibrary[selectedFamily] || [];
 
   return (
-    <div className="w-full md:w-96 bg-gray-800 p-6 flex flex-col gap-6 overflow-y-auto h-full border-r border-gray-700 shadow-xl z-10 custom-scrollbar">
+    <div className="w-full md:w-80 bg-gray-800 p-6 flex flex-col gap-6 overflow-y-auto h-full border-r border-gray-700 shadow-xl z-20 custom-scrollbar shrink-0">
       <div>
         <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-2">
           TextTango Web
         </h1>
         <p className="text-gray-400 text-sm">
-          Create 3D Optical Illusion Text
+          3D Optical Illusion Generator
         </p>
       </div>
 
@@ -147,7 +143,7 @@ const Controls: React.FC<ControlsProps> = ({
 
       {/* Basic Settings */}
       <div className="space-y-4">
-        <h3 className="text-gray-200 font-bold text-sm">Dimensions</h3>
+        <h3 className="text-gray-200 font-bold text-sm">Global Dimensions</h3>
         <div className="grid grid-cols-2 gap-4">
              <div>
                 <label className="text-[10px] text-gray-500 uppercase block mb-1">Font Size</label>
@@ -174,7 +170,7 @@ const Controls: React.FC<ControlsProps> = ({
                 <button 
                     onClick={() => handleChange('baseType', 'RECTANGLE')}
                     className={`flex-1 text-xs py-1.5 rounded transition-colors ${settings.baseType === 'RECTANGLE' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-                >Rectangle</button>
+                >Rect</button>
                 <button 
                     onClick={() => handleChange('baseType', 'OVAL')}
                     className={`flex-1 text-xs py-1.5 rounded transition-colors ${settings.baseType === 'OVAL' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
@@ -195,60 +191,66 @@ const Controls: React.FC<ControlsProps> = ({
              </div>
           </div>
 
-          {settings.baseType === 'RECTANGLE' && (
-              <div>
-                <label className="flex justify-between text-xs text-gray-400 mb-1">
-                    <span>Corner Radius</span>
-                    <span>{settings.baseCornerRadius}</span>
-                </label>
-                <input
-                    type="range" min="0" max="20" step="0.5"
-                    className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                    value={settings.baseCornerRadius}
-                    onChange={(e) => handleChange('baseCornerRadius', Number(e.target.value))}
-                />
-              </div>
-          )}
-
           <div>
             <label className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>Top Edge Bevel</span>
-                <span>{settings.baseTopRounding}</span>
+                <span>Embed Depth</span>
+                <span>{settings.embedDepth}</span>
             </label>
             <input
-                type="range" min="0" max="5" step="0.25"
+                type="range" min="-2" max="5" step="0.1"
                 className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                value={settings.baseTopRounding}
-                onChange={(e) => handleChange('baseTopRounding', Number(e.target.value))}
+                value={settings.embedDepth}
+                onChange={(e) => handleChange('embedDepth', Number(e.target.value))}
             />
           </div>
       </div>
 
       <hr className="border-gray-700" />
-
-      {/* Support */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-            <h3 className="text-gray-200 font-bold text-sm">Reinforcement</h3>
+      
+      {/* Global Support Defaults */}
+      <div className="space-y-3">
+         <div className="flex items-center justify-between">
+            <h3 className="text-gray-200 font-bold text-sm">Global Supports</h3>
             <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" className="sr-only peer" checked={settings.supportEnabled} onChange={(e) => handleChange('supportEnabled', e.target.checked)} />
                 <div className="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
-        </div>
-        {settings.supportEnabled && (
-            <div className="bg-gray-700/30 p-3 rounded space-y-3">
-                 <input
-                    type="text"
-                    className="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-xs text-white font-mono tracking-widest uppercase"
-                    value={settings.supportMask}
-                    placeholder="X_X"
-                    onChange={(e) => handleChange('supportMask', e.target.value.toUpperCase())}
-                />
-            </div>
-        )}
+         </div>
+         {settings.supportEnabled && (
+             <div className="bg-gray-700/30 p-2 rounded space-y-2">
+                 <select 
+                    className="w-full bg-gray-900 text-white text-xs rounded p-1 border border-gray-600"
+                    value={settings.supportType}
+                    onChange={(e) => handleChange('supportType', e.target.value as SupportType)}
+                 >
+                    <option value="CYLINDER">Cylinder</option>
+                    <option value="SQUARE">Square</option>
+                 </select>
+                 <div className="grid grid-cols-2 gap-2">
+                     <div>
+                         <label className="text-[9px] uppercase text-gray-500">Height</label>
+                         <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                            value={settings.supportHeight} onChange={(e) => handleChange('supportHeight', Number(e.target.value))} />
+                     </div>
+                     <div>
+                         <label className="text-[9px] uppercase text-gray-500">Radius</label>
+                         <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                            value={settings.supportRadius} onChange={(e) => handleChange('supportRadius', Number(e.target.value))} />
+                     </div>
+                 </div>
+             </div>
+         )}
       </div>
 
-      <div className="mt-auto pt-4">
+      <div className="mt-auto pt-2 space-y-2">
+        <button
+            onClick={toggleAdvanced}
+            className={`w-full py-2 px-3 rounded font-semibold text-xs transition-colors border ${showAdvanced ? 'bg-purple-600 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'}`}
+        >
+            <i className="fas fa-sliders-h mr-2"></i>
+            {showAdvanced ? 'Close Advanced' : 'Open Advanced Controls'}
+        </button>
+
         <button
           onClick={onDownload}
           disabled={!hasResult || isGenerating}
