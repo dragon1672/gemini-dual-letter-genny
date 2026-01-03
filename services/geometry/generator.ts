@@ -109,9 +109,6 @@ const shapesToManifold = (shapes: THREE.Shape[], m: any, depth: number) => {
 
 const createSupportPrimitive = (m: any, type: SupportType, height: number, size: number) => {
     try {
-        // We always return a primitive centered at (0,0,0) extending along Z from -height/2 to height/2
-        // This ensures consistent rotation logic downstream.
-        
         if (type === 'CYLINDER') {
             if (m.Manifold && typeof m.Manifold.cylinder === 'function') {
                 return m.Manifold.cylinder(height, size, size, 16, true);
@@ -129,6 +126,83 @@ const createSupportPrimitive = (m: any, type: SupportType, height: number, size:
         console.warn("Primitive creation failed", e);
     }
     return null;
+};
+
+// Auto-bridge logic: Decomposes manifold, finds vertically separated parts, and connects them.
+const applyAutoBridge = (inputManifold: any, m: any) => {
+    const componentsVec = inputManifold.decompose();
+    const isArray = Array.isArray(componentsVec);
+    const count = isArray ? componentsVec.length : componentsVec.size();
+    
+    if (count <= 1) {
+        if (!isArray && componentsVec.delete) componentsVec.delete();
+        return inputManifold;
+    }
+    
+    const parts: any[] = [];
+    for(let i=0; i<count; i++) {
+        parts.push(isArray ? componentsVec[i] : componentsVec.get(i));
+    }
+    if (!isArray && componentsVec.delete) componentsVec.delete();
+    
+    // Sort by Y position (bottom to top)
+    parts.sort((a, b) => {
+        const bA = a.boundingBox();
+        const bB = b.boundingBox();
+        return bA.min[1] - bB.min[1];
+    });
+
+    const bridgeGeoms = [];
+    
+    for(let i=0; i < parts.length - 1; i++) {
+        const lower = parts[i];
+        const upper = parts[i+1];
+        
+        const bLower = lower.boundingBox();
+        const bUpper = upper.boundingBox();
+        
+        // Check for vertical gap
+        const yMin = bLower.max[1];
+        const yMax = bUpper.min[1];
+        
+        // If there is a gap or they are just touching, bridge them
+        if (yMax > yMin - 0.2) { 
+            const height = (yMax - yMin) + 0.4; // Small overlap
+            const centerY = (yMax + yMin) / 2;
+            
+            // X/Z Centers
+            const cLx = (bLower.min[0] + bLower.max[0])/2;
+            const cLz = (bLower.min[2] + bLower.max[2])/2;
+            const cUx = (bUpper.min[0] + bUpper.max[0])/2;
+            const cUz = (bUpper.min[2] + bUpper.max[2])/2;
+            
+            const avgX = (cLx + cUx) / 2;
+            const avgZ = (cLz + cUz) / 2;
+            
+            // Bridge width
+            const bridgeWidth = 1.8; 
+            
+            try {
+                // Vertical Cylinder Bridge
+                // Manifold.cylinder is along Z. Rotate to Y.
+                let connector = m.Manifold.cylinder(height, bridgeWidth/2, bridgeWidth/2, 8, true);
+                connector = connector.rotate([-90, 0, 0]);
+                connector = connector.translate([avgX, centerY, avgZ]);
+                bridgeGeoms.push(connector);
+            } catch (e) { console.warn("Auto bridge failed", e); }
+        }
+    }
+    
+    // Union original parts + new bridges
+    const toUnion = [...parts, ...bridgeGeoms];
+    const united = m.Manifold.union(toUnion);
+    
+    // Cleanup intermediates
+    // inputManifold is technically represented by 'parts' now, so we can delete inputManifold
+    inputManifold.delete();
+    toUnion.forEach(p => { if (p !== united) p.delete(); });
+    
+    return united;
 };
 
 export const generateDualTextGeometry = async (settings: TextSettings): Promise<THREE.BufferGeometry | null> => {
@@ -192,12 +266,8 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                 const centerX = (b.max[0] + b.min[0]) / 2;
                 const bottomY = b.min[1];
                 const centerZ = (b.max[2] + b.min[2]) / 2;
-                
-                // Center and sit on Y=0
                 const centered = raw.translate([-centerX, -bottomY, -centerZ]);
-                
                 m1 = centered.rotate([0, 45, 0]); 
-                
                 raw.delete();
                 centered.delete();
              }
@@ -210,10 +280,8 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
                 const centerX = (b.max[0] + b.min[0]) / 2;
                 const bottomY = b.min[1];
                 const centerZ = (b.max[2] + b.min[2]) / 2;
-                
                 const centered = raw.translate([-centerX, -bottomY, -centerZ]);
                 m2 = centered.rotate([0, -45, 0]); 
-                
                 raw.delete();
                 centered.delete();
              }
@@ -249,6 +317,11 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       if (m2) m2.delete();
 
       if (resultManifold) {
+          // --- Auto Bridge Logic ---
+          if (config.bridge && config.bridge.enabled && config.bridge.auto) {
+             resultManifold = applyAutoBridge(resultManifold, m);
+          }
+
           const b = resultManifold.boundingBox();
           const width = b.max[0] - b.min[0];
 
@@ -256,55 +329,48 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
              const centerX = currentXOffset + (width / 2);
              
              // --- Apply Intersection Config Transforms ---
-             // Scale
              const sX = config.transform.scaleX || 1;
              const sY = config.transform.scaleY || 1;
-             
-             // Move
              const dX = config.transform.moveX || 0;
              const dZ = config.transform.moveZ || 0;
              
-             // Scale transformation
              let transformed = resultManifold.scale([sX, sY, 1]); 
-             
-             // Translate transformation
              const finalPos = transformed.translate([centerX + dX, 0, dZ]);
              parts.push(finalPos);
+
+             // --- Manual Connector Bridge ---
+             // Only if enabled AND auto is false
+             if (config.bridge && config.bridge.enabled && !config.bridge.auto) {
+                 try {
+                     const { width: bw, height: bh, depth: bd, moveX: bx, moveY: by, moveZ: bz, rotationZ } = config.bridge;
+                     let bridge = m.Manifold.cube([bw, bh, bd], true);
+                     
+                     if (rotationZ !== 0) {
+                         const rotated = bridge.rotate([0, 0, rotationZ]);
+                         bridge.delete();
+                         bridge = rotated;
+                     }
+
+                     const positionedBridge = bridge.translate([centerX + dX + bx, by, dZ + bz]);
+                     parts.push(positionedBridge);
+                     bridge.delete();
+                 } catch (e) {
+                     console.warn("Manual bridge generation failed", e);
+                 }
+             }
 
              // --- Supports ---
              const supp = config.support;
              if (supp && supp.enabled) {
                  const h = supp.height;
                  const w = supp.width;
-                 
                  const supportGeom = createSupportPrimitive(m, supp.type, h, w);
-                 
                  if (supportGeom) {
-                     // 1. Initially centered at (0,0,0) in Z [-h/2, h/2]
-                     // 2. Rotate to Y axis [-90, 0, 0] -> Y [-h/2, h/2]
                      const rotated = supportGeom.rotate([-90, 0, 0]);
-                     
-                     // 3. Positioning
-                     // We want the support to start at the bottom of the base (print bed anchor)
-                     // and go upwards by 'height'.
-                     
-                     // Calculate Base Bottom Y
-                     // Base Top is at 'embedDepth'. 
-                     // Base Bottom is 'embedDepth - baseHeight'.
                      const baseBottomY = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
-                     
-                     // We want the support Y range to be [baseBottomY, baseBottomY + h].
-                     // Currently 'rotated' Y range is [-h/2, h/2].
-                     // Target Center = baseBottomY + h/2.
-                     // Shift = Target Center - (Current Center 0) = baseBottomY + h/2.
-                     
                      const shiftY = baseBottomY + (h / 2);
-                     
                      const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
-                     
                      parts.push(positioned);
-                     
-                     // Clean up intermediates
                      if (supportGeom !== rotated) supportGeom.delete();
                      if (rotated !== positioned) rotated.delete();
                  }
@@ -364,15 +430,9 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         if (baseManifoldRaw) {
             const baseRotated = baseManifoldRaw.rotate([-90, 0, 0]);
             baseManifoldRaw.delete();
-
-            // Base Top Target: Y=embedDepth
-            // Base Height: baseHeight
-            // Shift = embedDepth - baseHeight
             const yOffset = embedDepth - baseHeight;
-            
             const baseFinal = baseRotated.translate([center.x, yOffset, center.z]);
             baseRotated.delete();
-            
             parts.push(baseFinal);
         }
       } catch (e) {
@@ -389,6 +449,8 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       }
 
       // 4. Remove Floating Parts
+      // NOTE: With auto-bridge enabled, parts like '?' dots are now connected to the body.
+      // This cleanup step will no longer delete them.
       let cleanManifold = finalManifold;
 
       if (baseHeight > 0) {

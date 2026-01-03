@@ -48,6 +48,17 @@ const App: React.FC = () => {
                             type: prev.supportType, 
                             height: prev.supportHeight, 
                             width: prev.supportRadius 
+                        },
+                        bridge: {
+                            enabled: true, // Default enabled
+                            auto: true,    // Default auto
+                            width: 2,
+                            height: 3,
+                            depth: 2,
+                            moveX: 0,
+                            moveY: 2.5,
+                            moveZ: 0,
+                            rotationZ: 0
                         }
                     });
                 }
@@ -71,6 +82,22 @@ const App: React.FC = () => {
                      width: prev.supportRadius
                  };
              }
+             
+             // Ensure bridge exists for older configs
+             if (!next.bridge) {
+                 next.bridge = {
+                    enabled: true,
+                    auto: true,
+                    width: 2,
+                    height: 3,
+                    depth: 2,
+                    moveX: 0,
+                    moveY: 2.5,
+                    moveZ: 0,
+                    rotationZ: 0
+                };
+             }
+             
              return next;
         });
         

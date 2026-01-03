@@ -23,6 +23,7 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                 ...changes,
                 transform: changes.transform ? { ...current.transform, ...changes.transform } : current.transform,
                 support: changes.support ? { ...current.support, ...changes.support } : current.support,
+                bridge: changes.bridge ? { ...current.bridge, ...changes.bridge } : current.bridge,
                 isOverridden: true
             };
             
@@ -43,6 +44,13 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                     type: prev.supportType, 
                     height: prev.supportHeight, 
                     width: prev.supportRadius 
+                },
+                bridge: {
+                    enabled: true,
+                    auto: true,
+                    width: 2, height: 3, depth: 2,
+                    moveX: 0, moveY: 2.5, moveZ: 0,
+                    rotationZ: 0
                 }
             };
             return { ...prev, intersectionConfig: newArr };
@@ -131,6 +139,98 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                                 />
                              </div>
                         </div>
+                    </div>
+
+                    {/* Bridge */}
+                    <div className="space-y-3">
+                         <div className="flex justify-between items-center border-b border-gray-700 pb-1">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase flex items-center gap-2">
+                                <i className="fas fa-link text-xs"></i>
+                                Connector Bridge
+                            </h3>
+                            <input 
+                                type="checkbox" 
+                                checked={configArray[selectedIdx].bridge?.enabled ?? false}
+                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, enabled: e.target.checked } }))}
+                            />
+                        </div>
+
+                        {configArray[selectedIdx].bridge?.enabled && (
+                            <div className="bg-gray-800/50 p-2 rounded space-y-2 border border-gray-700">
+                                <p className="text-[9px] text-gray-400 italic mb-1">Connect floating parts (like ? or ! dots) to the main body.</p>
+                                
+                                <div className="flex items-center gap-2 mb-2">
+                                    <input 
+                                        type="checkbox"
+                                        id="autoBridge"
+                                        checked={configArray[selectedIdx].bridge.auto}
+                                        onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, auto: e.target.checked } }))}
+                                    />
+                                    <label htmlFor="autoBridge" className="text-[10px] text-blue-300 font-bold uppercase cursor-pointer">Auto-Detect & Connect</label>
+                                </div>
+
+                                {!configArray[selectedIdx].bridge.auto && (
+                                    <>
+                                    <div className="grid grid-cols-3 gap-2">
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Width</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.width}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, width: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Height</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.height}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, height: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Depth</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.depth}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, depth: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-2">
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Pos X</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.moveX}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveX: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Pos Y</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.moveY}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveY: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                         <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Pos Z</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
+                                                value={configArray[selectedIdx].bridge.moveZ}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveZ: Number(e.target.value) } }))}
+                                            />
+                                         </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[9px] uppercase text-gray-500">Rotation Z</label>
+                                        <input type="range" min="-90" max="90" step="5" className="w-full h-1 bg-gray-700 rounded cursor-pointer mt-1"
+                                            value={configArray[selectedIdx].bridge.rotationZ}
+                                            onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, rotationZ: Number(e.target.value) } }))}
+                                        />
+                                        <div className="text-right text-[9px] text-gray-400">{configArray[selectedIdx].bridge.rotationZ}°</div>
+                                    </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {/* Supports */}

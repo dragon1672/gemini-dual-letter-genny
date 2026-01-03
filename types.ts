@@ -15,12 +15,25 @@ export interface IndividualSupportSettings {
   width: number; 
 }
 
+export interface BridgeSettings {
+  enabled: boolean;
+  auto: boolean;
+  width: number;
+  height: number;
+  depth: number;
+  moveX: number;
+  moveY: number;
+  moveZ: number;
+  rotationZ: number;
+}
+
 export interface IntersectionConfig {
   id: string;
   char1: string;
   char2: string;
   transform: TransformSettings;
   support: IndividualSupportSettings;
+  bridge: BridgeSettings;
   isOverridden: boolean;
 }
 
