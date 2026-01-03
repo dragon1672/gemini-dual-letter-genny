@@ -4,6 +4,7 @@ import { TextSettings, SupportType, CharTransform } from '../../types';
 import { loadFont } from './text';
 import { getManifold } from './loader';
 import { fromManifold } from './converters';
+import { FALLBACK_FONT_URLS } from '../../constants';
 
 // Helper to sanitize points for Manifold
 const cleanPoints = (points: number[][]): number[][] => {
@@ -209,11 +210,22 @@ const applyAutoBridge = (inputManifold: any, m: any) => {
 export const generateDualTextGeometry = async (settings: TextSettings): Promise<THREE.BufferGeometry | null> => {
   if (!settings.fontUrl) throw new Error("No font selected");
 
-  const [globalFont, m] = await Promise.all([
+  // Load Primary Font, Manifold, and Fallback Fonts in parallel
+  const fontLoadPromises = [
       loadFont(settings.fontUrl),
-      getManifold()
-  ]);
+      getManifold(),
+      ...FALLBACK_FONT_URLS.map(url => loadFont(url).catch(e => {
+          console.warn("Failed to load fallback font:", url);
+          return null;
+      }))
+  ];
 
+  const results = await Promise.all(fontLoadPromises);
+  const globalFont = results[0] as any;
+  const m = results[1] as any;
+  const fallbackFonts = results.slice(2).filter(f => f !== null) as any[];
+
+  if (!globalFont) throw new Error("Failed to load selected font.");
   if (!m) throw new Error("Could not initialize Geometry Engine (Manifold).");
 
   const { 
@@ -235,6 +247,26 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
   
   let currentXOffset = 0;
 
+  // Helper to choose the best font for a character
+  const getBestFontForChar = (char: string, preferredFont: any) => {
+      if (!char || char.trim() === '') return preferredFont;
+      
+      // Check if preferred font has glyph
+      if (preferredFont.data?.glyphs && preferredFont.data.glyphs[char]) {
+          return preferredFont;
+      }
+      
+      // Check fallbacks
+      for (const fb of fallbackFonts) {
+          if (fb.data?.glyphs && fb.data.glyphs[char]) {
+              return fb;
+          }
+      }
+      
+      // Default to preferred if nothing found (will likely render nothing or box)
+      return preferredFont;
+  };
+
   // --- 1. Generate Letter Intersections ---
   for (let i = 0; i < length; i++) {
       const config = intersectionConfig[i];
@@ -248,11 +280,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           continue;
       }
 
-      // Determine Fonts (Global vs Local Split)
-      // Fallback chain: charSpecific -> legacyPairOverride -> global
-      let font1 = globalFont;
-      let font2 = globalFont;
-
+      // Determine Base Fonts (Global vs Local Split)
       const resolveFont = async (url?: string) => {
           if (url && url !== settings.fontUrl) {
               try {
@@ -264,12 +292,19 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           return globalFont;
       };
 
+      let font1 = globalFont;
       if (config.char1FontUrl || config.fontUrl) {
           font1 = await resolveFont(config.char1FontUrl || config.fontUrl);
       }
+      
+      let font2 = globalFont;
       if (config.char2FontUrl || config.fontUrl) {
           font2 = await resolveFont(config.char2FontUrl || config.fontUrl);
       }
+
+      // Apply fallback logic per character
+      const finalFont1 = getBestFontForChar(char1, font1);
+      const finalFont2 = getBestFontForChar(char2, font2);
 
       const getCharManifold = (c: string, transform: CharTransform, font: any) => {
           if (c.trim() === '') return null;
@@ -279,7 +314,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           
           if (mani) {
               // Apply Per-Char Transforms (in 2D space basically, before rotation)
-              // We effectively scale X/Y and translate X/Y relative to the character origin
               const { scaleX, scaleY, moveX, moveY } = transform;
               if (scaleX !== 1 || scaleY !== 1) {
                    const scaled = mani.scale([scaleX, scaleY, 1]); 
@@ -301,7 +335,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 
       try {
         if (!isC1Space) {
-             const raw = getCharManifold(char1, config.char1Transform, font1);
+             const raw = getCharManifold(char1, config.char1Transform, finalFont1);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
@@ -316,7 +350,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         }
 
         if (!isC2Space) {
-             const raw = getCharManifold(char2, config.char2Transform, font2);
+             const raw = getCharManifold(char2, config.char2Transform, finalFont2);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
@@ -374,8 +408,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
              const pX = config.pairSpacing.x || 0;
              const pZ = config.pairSpacing.z || 0;
              
-             // We no longer scale the result here unless we add a pairScale later.
-             // Translation handles kerning/centering of the illusion block.
              const finalPos = resultManifold.translate([centerX + pX, 0, pZ]);
              parts.push(finalPos);
 

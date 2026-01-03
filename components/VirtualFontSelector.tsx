@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FontLibrary, FontVariant } from '../types';
+import { FALLBACK_FONT_URLS } from '../constants';
 
 interface VirtualFontSelectorProps {
     fontLibrary: FontLibrary;
@@ -14,22 +15,90 @@ interface VirtualFontSelectorProps {
 const loadedFonts = new Set<string>();
 const loadingFonts = new Map<string, Promise<void>>();
 const parsedFonts = new Map<string, any>(); // Cache for OpenType font objects
+
+// Fallback Font State
+let fallbackInitPromise: Promise<void> | null = null;
+const fallbackOpentypeFonts: any[] = [];
+const fallbackFontFamilyNames: string[] = [];
+
+// Initialize fallback fonts (Symbols, CJK, etc.)
+const initFallbackFonts = () => {
+    if (fallbackInitPromise) return fallbackInitPromise;
+
+    fallbackInitPromise = (async () => {
+        // @ts-ignore
+        if (!window.opentype) return;
+
+        const promises = FALLBACK_FONT_URLS.map(async (url, index) => {
+            try {
+                const name = `GlobalFallback_${index}`;
+                const res = await fetch(url);
+                const buffer = await res.arrayBuffer();
+                
+                // CSS Font Face
+                const fontFace = new FontFace(name, buffer);
+                await fontFace.load();
+                document.fonts.add(fontFace);
+                
+                // OpenType Parse
+                // @ts-ignore
+                const otFont = window.opentype.parse(buffer);
+                
+                return { name, otFont };
+            } catch (e) {
+                console.warn("Failed to load fallback font", url, e);
+                return null;
+            }
+        });
+
+        const results = await Promise.all(promises);
+        results.forEach(res => {
+            if (res) {
+                fallbackFontFamilyNames.push(res.name);
+                fallbackOpentypeFonts.push(res.otFont);
+            }
+        });
+    })();
+    return fallbackInitPromise;
+};
+
+
 // Cache for validated preview strings per font + text
 const glyphCheckCache = new Map<string, string>();
 
-// Helper to check glyphs against a parsed font
+// Helper to check glyphs against a parsed font AND fallbacks
 const checkGlyphs = (otFont: any, text: string): string => {
-    if (!otFont) return text;
     try {
         const uniqueChars = Array.from(new Set([...text]));
         const missing = new Set();
+        
         uniqueChars.forEach(char => {
-            const glyph = otFont.charToGlyph(char);
-            // .notdef is typically index 0 or named .notdef
-            if (glyph.index === 0 || glyph.name === '.notdef') {
+            let found = false;
+
+            // 1. Check Primary Font
+            if (otFont) {
+                const glyph = otFont.charToGlyph(char);
+                if (glyph.index !== 0 && glyph.name !== '.notdef') {
+                    found = true;
+                }
+            }
+
+            // 2. Check Fallbacks (if not in primary)
+            if (!found) {
+                for (const fbFont of fallbackOpentypeFonts) {
+                    const glyph = fbFont.charToGlyph(char);
+                    if (glyph.index !== 0 && glyph.name !== '.notdef') {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
                 missing.add(char);
             }
         });
+
         return text.split('').map(c => missing.has(c) ? '?' : c).join('');
     } catch (e) {
         return text;
@@ -67,8 +136,8 @@ const FontRow = ({
         // If result is already cached, update immediately
         if (glyphCheckCache.has(cacheKey)) {
             setValidatedText(glyphCheckCache.get(cacheKey)!);
-        } else if (parsedFonts.has(fontName)) {
-            // If font is parsed but this specific text result isn't cached, check now
+        } else if (parsedFonts.has(fontName) && fallbackInitPromise) {
+            // If font is parsed AND fallbacks are ready, check now
             const checked = checkGlyphs(parsedFonts.get(fontName), previewText);
             glyphCheckCache.set(cacheKey, checked);
             setValidatedText(checked);
@@ -84,6 +153,10 @@ const FontRow = ({
         let mounted = true;
 
         const loadFont = async () => {
+            // Ensure fallbacks are initializing/loaded
+            if (!fallbackInitPromise) initFallbackFonts();
+            await fallbackInitPromise;
+
             // If completely new font, fetch and parse
             if (!loadingFonts.has(fontName)) {
                 const loadTask = async () => {
@@ -111,13 +184,14 @@ const FontRow = ({
                 loadingFonts.set(fontName, loadTask());
             }
 
-            // Wait for load to finish (whether it was us or someone else)
+            // Wait for load to finish
             await loadingFonts.get(fontName);
 
             if (mounted) {
                 setIsLoaded(true);
                 // Perform check if not done yet
-                if (!glyphCheckCache.has(cacheKey) && parsedFonts.has(fontName)) {
+                if (!glyphCheckCache.has(cacheKey)) {
+                    // Note: checkGlyphs will internally use the now-loaded fallbackOpentypeFonts
                     const checked = checkGlyphs(parsedFonts.get(fontName), previewText);
                     glyphCheckCache.set(cacheKey, checked);
                     setValidatedText(checked);
@@ -130,7 +204,9 @@ const FontRow = ({
         return () => { mounted = false; };
     }, [fontName, variant.url, previewText, cacheKey, isLoaded]);
 
-    const fontStyle = { fontFamily: isLoaded ? `"${fontName}", sans-serif` : 'sans-serif' };
+    // Build font stack: Primary -> Fallbacks -> System
+    const fontStack = [`"${fontName}"`, ...fallbackFontFamilyNames.map(n => `"${n}"`), 'sans-serif'].join(', ');
+    const fontStyle = { fontFamily: isLoaded ? fontStack : 'sans-serif' };
 
     return (
         <div 
@@ -170,6 +246,11 @@ export const VirtualFontSelector: React.FC<VirtualFontSelectorProps> = ({
     const inputRef = useRef<HTMLInputElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Trigger fallback load immediately when selector is mounted
+    useEffect(() => {
+        initFallbackFonts();
+    }, []);
 
     const filteredFamilies = useMemo(() => {
         if (!filter) return families;

@@ -2,6 +2,11 @@
 import { FontLibrary, BaseType, SupportType, TextSettings } from './types';
 import { BASE_URL, RAW_FONT_PATHS } from './font_constants';
 
+export const FALLBACK_FONT_URLS = [
+    `${BASE_URL}/ofl/ibmplexsansjp/IBMPlexSansJP-Regular.ttf`,
+    `${BASE_URL}/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf`
+];
+
 export const getFontLibrary = (): FontLibrary => {
     const library: FontLibrary = {};
 
@@ -48,7 +53,7 @@ export const getFontLibrary = (): FontLibrary => {
 };
 
 const library = getFontLibrary();
-const defaultFamily = 'IBMPlex sans jp'; 
+const defaultFamily = 'IBMPlex Sans JP'; 
 const defaultUrl = library[defaultFamily]?.[1]?.url || library['Roboto']?.[0]?.url;
 
 export const DEFAULT_SETTINGS: TextSettings = {
