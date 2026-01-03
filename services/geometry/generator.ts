@@ -208,7 +208,7 @@ const applyAutoBridge = (inputManifold: any, m: any) => {
 export const generateDualTextGeometry = async (settings: TextSettings): Promise<THREE.BufferGeometry | null> => {
   if (!settings.fontUrl) throw new Error("No font selected");
 
-  const [font, m] = await Promise.all([
+  const [globalFont, m] = await Promise.all([
       loadFont(settings.fontUrl),
       getManifold()
   ]);
@@ -223,7 +223,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
     basePadding,
     baseType, 
     baseCornerRadius, 
-    embedDepth
+    embedDepth: globalEmbedDepth
   } = settings;
 
   const length = intersectionConfig.length;
@@ -247,11 +247,44 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
           continue;
       }
 
-      const getCharManifold = (c: string) => {
+      // Determine Fonts (Global vs Local Split)
+      // Fallback chain: charSpecific -> legacyPairOverride -> global
+      let font1 = globalFont;
+      let font2 = globalFont;
+
+      // Helper to resolve font override
+      const resolveFont = async (url?: string) => {
+          if (url && url !== settings.fontUrl) {
+              try {
+                  return await loadFont(url);
+              } catch (e) {
+                  console.warn(`Failed to load font ${url}, using global.`);
+              }
+          }
+          return globalFont;
+      };
+
+      // Load overrides if needed
+      if (config.char1FontUrl || config.fontUrl) {
+          font1 = await resolveFont(config.char1FontUrl || config.fontUrl);
+      }
+      if (config.char2FontUrl || config.fontUrl) {
+          font2 = await resolveFont(config.char2FontUrl || config.fontUrl);
+      }
+
+      const getCharManifold = (c: string, scaleWidth: number, font: any) => {
           if (c.trim() === '') return null;
           const shapes = font.generateShapes(c, fontSize);
           if (!shapes || shapes.length === 0) return null;
-          return shapesToManifold(shapes, m, extrusionDepth);
+          let mani = shapesToManifold(shapes, m, extrusionDepth);
+          
+          // Apply sub-char width scaling if not 1
+          if (mani && scaleWidth !== 1 && scaleWidth > 0) {
+              const scaled = mani.scale([scaleWidth, 1, 1]); // Scale X (width)
+              mani.delete();
+              return scaled;
+          }
+          return mani;
       };
 
       let resultManifold = null;
@@ -260,7 +293,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
 
       try {
         if (!isC1Space) {
-             const raw = getCharManifold(char1);
+             const raw = getCharManifold(char1, config.char1Width ?? 1, font1);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
@@ -274,7 +307,7 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         }
 
         if (!isC2Space) {
-             const raw = getCharManifold(char2);
+             const raw = getCharManifold(char2, config.char2Width ?? 1, font2);
              if (raw) {
                 const b = raw.boundingBox();
                 const centerX = (b.max[0] + b.min[0]) / 2;
@@ -359,55 +392,21 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
              // --- Supports ---
              const supp = config.support;
              if (supp && supp.enabled) {
-                 if (supp.type === 'PROFILE') {
-                     // PROFILE Support Logic: Slice at Y, extrude down to base
-                     const sliceH = supp.sliceHeight ?? 4; 
-                     const baseBottomRel = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
-                     const extrudeLen = sliceH - baseBottomRel;
-
-                     if (extrudeLen > 0) {
-                         try {
-                            // Rotate Y->Z to slice with default plane
-                            const oriented = transformed.rotate([90, 0, 0]); 
-                            const cs = oriented.slice(sliceH);
-                            
-                            // Extrude along Z [0, extrudeLen]
-                            const pillar = m.Manifold.extrude(cs, extrudeLen, 0, 0, 1.0, 1.0);
-                            
-                            // Position Z top at sliceH: translate Z by (baseBottomRel)
-                            const shiftedPillar = pillar.translate([0, 0, baseBottomRel]);
-                            
-                            // Rotate back Z->Y
-                            const finalPillar = shiftedPillar.rotate([-90, 0, 0]);
-                            
-                            // Apply final scene translation
-                            const positioned = finalPillar.translate([centerX + dX, 0, dZ]);
-                            
-                            parts.push(positioned);
-                            
-                            oriented.delete();
-                            cs.delete();
-                            pillar.delete();
-                            shiftedPillar.delete();
-                            finalPillar.delete();
-                         } catch (e) {
-                             console.warn("Profile support generation failed", e);
-                         }
-                     }
-                 } else {
-                     // Standard Primitive Supports
-                     const h = supp.height;
-                     const w = supp.width;
-                     const supportGeom = createSupportPrimitive(m, supp.type, h, w);
-                     if (supportGeom) {
-                         const rotated = supportGeom.rotate([-90, 0, 0]);
-                         const baseBottomY = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
-                         const shiftY = baseBottomY + (h / 2);
-                         const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
-                         parts.push(positioned);
-                         if (supportGeom !== rotated) supportGeom.delete();
-                         if (rotated !== positioned) rotated.delete();
-                     }
+                 const h = supp.height;
+                 const w = supp.width;
+                 const supportGeom = createSupportPrimitive(m, supp.type, h, w);
+                 if (supportGeom) {
+                     const rotated = supportGeom.rotate([-90, 0, 0]);
+                     
+                     // Determine embed depth (local vs global)
+                     const activeEmbedDepth = config.embedDepth ?? globalEmbedDepth;
+                     const baseBottomY = (baseHeight > 0) ? (activeEmbedDepth - baseHeight) : 0;
+                     
+                     const shiftY = baseBottomY + (h / 2);
+                     const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
+                     parts.push(positioned);
+                     if (supportGeom !== rotated) supportGeom.delete();
+                     if (rotated !== positioned) rotated.delete();
                  }
              }
              
@@ -465,7 +464,12 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
         if (baseManifoldRaw) {
             const baseRotated = baseManifoldRaw.rotate([-90, 0, 0]);
             baseManifoldRaw.delete();
-            const yOffset = embedDepth - baseHeight;
+            
+            // Note: Base vertical position depends on the "Deepest" embed depth? 
+            // Standard approach: Base is generated relative to global or lowest point. 
+            // Simplified: Use global embed depth for base placement or 0.
+            const yOffset = globalEmbedDepth - baseHeight;
+            
             const baseFinal = baseRotated.translate([center.x, yOffset, center.z]);
             baseRotated.delete();
             parts.push(baseFinal);
@@ -484,8 +488,6 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
       }
 
       // 4. Remove Floating Parts
-      // NOTE: With auto-bridge enabled, parts like '?' dots are now connected to the body.
-      // This cleanup step will no longer delete them.
       let cleanManifold = finalManifold;
 
       if (baseHeight > 0) {

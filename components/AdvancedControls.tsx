@@ -1,13 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TextSettings, IntersectionConfig, SupportType } from '../types';
+import { getFontLibrary } from '../constants';
+import { VirtualFontSelector } from './VirtualFontSelector';
 
 interface AdvancedControlsProps {
     settings: TextSettings;
     setSettings: React.Dispatch<React.SetStateAction<TextSettings>>;
 }
 
+const Accordion: React.FC<{ title: string; children: React.ReactNode; defaultOpen?: boolean }> = ({ title, children, defaultOpen = true }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+    return (
+        <div className="border border-gray-700 rounded bg-gray-800/50">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex items-center justify-between p-2 px-3 text-[10px] font-bold text-gray-300 hover:bg-gray-700/50 transition-colors uppercase tracking-wider"
+            >
+                <span>{title}</span>
+                <i className={`fas fa-chevron-down transition-transform ${isOpen ? 'rotate-180' : ''}`}></i>
+            </button>
+            {isOpen && <div className="p-3 border-t border-gray-700 space-y-3">{children}</div>}
+        </div>
+    );
+};
+
 const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettings }) => {
     const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+    const fontLibrary = useMemo(() => getFontLibrary(), []);
 
     const configArray = settings.intersectionConfig;
     
@@ -38,6 +57,12 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
             newArr[index] = {
                 ...current,
                 isOverridden: false,
+                fontUrl: undefined,
+                char1FontUrl: undefined,
+                char2FontUrl: undefined,
+                embedDepth: undefined,
+                char1Width: undefined,
+                char2Width: undefined,
                 transform: { scaleX: 1, scaleY: 1, moveX: 0, moveZ: 0 },
                 support: { 
                     enabled: prev.supportEnabled, 
@@ -95,8 +120,8 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
 
             {/* Editor */}
             {selectedIdx !== null && (
-                <div className="p-4 space-y-6 animate-fade-in">
-                    <div className="flex justify-between items-center">
+                <div className="p-4 space-y-4 animate-fade-in">
+                    <div className="flex justify-between items-center mb-2">
                         <span className="text-xs font-bold text-gray-300">
                             Editing: <span className="text-lg mx-1 font-mono text-white">{configArray[selectedIdx].char1}/{configArray[selectedIdx].char2}</span>
                         </span>
@@ -104,21 +129,85 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                             <button onClick={() => resetConfig(selectedIdx)} className="text-[10px] text-red-400 hover:text-red-300 underline">Reset</button>
                         </div>
                     </div>
+                    
+                    <Accordion title="Typography & Depth">
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[9px] uppercase text-blue-300 block mb-1">Left Char Font ({configArray[selectedIdx].char1})</label>
+                                <VirtualFontSelector 
+                                    fontLibrary={fontLibrary}
+                                    currentUrl={configArray[selectedIdx].char1FontUrl || configArray[selectedIdx].fontUrl}
+                                    onSelect={(url) => updateConfig(selectedIdx, { char1FontUrl: url })}
+                                    previewText={configArray[selectedIdx].char1 || "A"}
+                                    placeholder="(Global)"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[9px] uppercase text-pink-300 block mb-1">Right Char Font ({configArray[selectedIdx].char2})</label>
+                                <VirtualFontSelector 
+                                    fontLibrary={fontLibrary}
+                                    currentUrl={configArray[selectedIdx].char2FontUrl || configArray[selectedIdx].fontUrl}
+                                    onSelect={(url) => updateConfig(selectedIdx, { char2FontUrl: url })}
+                                    previewText={configArray[selectedIdx].char2 || "B"}
+                                    placeholder="(Global)"
+                                />
+                            </div>
+                            
+                            <div>
+                                <div className="flex justify-between text-[9px] text-gray-500 uppercase mb-1">
+                                    <span>Embed Depth Override</span>
+                                    <span className="text-white">{configArray[selectedIdx].embedDepth ?? "(Global)"}</span>
+                                </div>
+                                <div className="flex gap-2 items-center">
+                                    <input
+                                        type="range" min="-2" max="10" step="0.1"
+                                        className="flex-1 h-1 bg-gray-700 rounded appearance-none cursor-pointer"
+                                        value={configArray[selectedIdx].embedDepth ?? settings.embedDepth}
+                                        onChange={(e) => updateConfig(selectedIdx, { embedDepth: Number(e.target.value) })}
+                                    />
+                                    <button 
+                                        onClick={() => updateConfig(selectedIdx, { embedDepth: undefined })}
+                                        className="text-[10px] text-gray-500 hover:text-white"
+                                        title="Reset to global"
+                                    >
+                                        <i className="fas fa-undo"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </Accordion>
 
-                    {/* Transform */}
-                    <div className="space-y-3">
-                        <h3 className="text-xs font-bold text-gray-400 uppercase border-b border-gray-700 pb-1">Result Transform</h3>
-                        
+                    <Accordion title="Character Scaling">
+                         <div className="grid grid-cols-2 gap-3">
+                             <div>
+                                <label className="text-[9px] uppercase text-blue-300 block mb-1">Width: {configArray[selectedIdx].char1}</label>
+                                <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                    value={configArray[selectedIdx].char1Width ?? 1}
+                                    onChange={(e) => updateConfig(selectedIdx, { char1Width: Number(e.target.value) })}
+                                />
+                             </div>
+                             <div>
+                                <label className="text-[9px] uppercase text-pink-300 block mb-1">Width: {configArray[selectedIdx].char2}</label>
+                                <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                    value={configArray[selectedIdx].char2Width ?? 1}
+                                    onChange={(e) => updateConfig(selectedIdx, { char2Width: Number(e.target.value) })}
+                                />
+                             </div>
+                        </div>
+                        <p className="text-[9px] text-gray-500 italic mt-1">Stretches individual characters before intersection to fit better.</p>
+                    </Accordion>
+
+                    <Accordion title="Result Transform">
                         <div className="grid grid-cols-2 gap-3">
                              <div>
-                                <label className="text-[9px] uppercase text-gray-500">Scale Width</label>
+                                <label className="text-[9px] uppercase text-gray-500">Scale X</label>
                                 <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
                                     value={configArray[selectedIdx].transform.scaleX}
                                     onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, scaleX: Number(e.target.value) } }))}
                                 />
                              </div>
                              <div>
-                                <label className="text-[9px] uppercase text-gray-500">Scale Height</label>
+                                <label className="text-[9px] uppercase text-gray-500">Scale Y</label>
                                 <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
                                     value={configArray[selectedIdx].transform.scaleY}
                                     onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, scaleY: Number(e.target.value) } }))}
@@ -132,22 +221,18 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                                 />
                              </div>
                              <div>
-                                <label className="text-[9px] uppercase text-gray-500">Offset Z (Depth)</label>
+                                <label className="text-[9px] uppercase text-gray-500">Offset Z</label>
                                 <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
                                     value={configArray[selectedIdx].transform.moveZ}
                                     onChange={(e) => updateConfig(selectedIdx, c => ({ transform: { ...c.transform, moveZ: Number(e.target.value) } }))}
                                 />
                              </div>
                         </div>
-                    </div>
+                    </Accordion>
 
-                    {/* Bridge */}
-                    <div className="space-y-3">
-                         <div className="flex justify-between items-center border-b border-gray-700 pb-1">
-                            <h3 className="text-xs font-bold text-gray-400 uppercase flex items-center gap-2">
-                                <i className="fas fa-link text-xs"></i>
-                                Connector Bridge
-                            </h3>
+                    <Accordion title="Bridge & Connection">
+                         <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase">Enable Bridge</span>
                             <input 
                                 type="checkbox" 
                                 checked={configArray[selectedIdx].bridge?.enabled ?? false}
@@ -156,10 +241,8 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                         </div>
 
                         {configArray[selectedIdx].bridge?.enabled && (
-                            <div className="bg-gray-800/50 p-2 rounded space-y-2 border border-gray-700">
-                                <p className="text-[9px] text-gray-400 italic mb-1">Connect floating parts (like ? or ! dots) to the main body.</p>
-                                
-                                <div className="flex items-center gap-2 mb-2">
+                            <div className="space-y-2">
+                                <div className="flex items-center gap-2 mb-2 bg-gray-800 p-2 rounded">
                                     <input 
                                         type="checkbox"
                                         id="autoBridge"
@@ -194,49 +277,15 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                                             />
                                          </div>
                                     </div>
-
-                                    <div className="grid grid-cols-3 gap-2">
-                                         <div>
-                                            <label className="text-[9px] uppercase text-gray-500">Pos X</label>
-                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
-                                                value={configArray[selectedIdx].bridge.moveX}
-                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveX: Number(e.target.value) } }))}
-                                            />
-                                         </div>
-                                         <div>
-                                            <label className="text-[9px] uppercase text-gray-500">Pos Y</label>
-                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
-                                                value={configArray[selectedIdx].bridge.moveY}
-                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveY: Number(e.target.value) } }))}
-                                            />
-                                         </div>
-                                         <div>
-                                            <label className="text-[9px] uppercase text-gray-500">Pos Z</label>
-                                            <input type="number" step="0.5" className="w-full bg-gray-900 text-xs p-1 rounded border border-gray-600"
-                                                value={configArray[selectedIdx].bridge.moveZ}
-                                                onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, moveZ: Number(e.target.value) } }))}
-                                            />
-                                         </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-[9px] uppercase text-gray-500">Rotation Z</label>
-                                        <input type="range" min="-90" max="90" step="5" className="w-full h-1 bg-gray-700 rounded cursor-pointer mt-1"
-                                            value={configArray[selectedIdx].bridge.rotationZ}
-                                            onChange={(e) => updateConfig(selectedIdx, c => ({ bridge: { ...c.bridge, rotationZ: Number(e.target.value) } }))}
-                                        />
-                                        <div className="text-right text-[9px] text-gray-400">{configArray[selectedIdx].bridge.rotationZ}°</div>
-                                    </div>
                                     </>
                                 )}
                             </div>
                         )}
-                    </div>
+                    </Accordion>
 
-                    {/* Supports */}
-                    <div className="space-y-3">
-                        <div className="flex justify-between items-center border-b border-gray-700 pb-1">
-                            <h3 className="text-xs font-bold text-gray-400 uppercase">Support Pillar</h3>
+                    <Accordion title="Support Pillar">
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase">Enable Support</span>
                             <input 
                                 type="checkbox" 
                                 checked={configArray[selectedIdx].support.enabled}
@@ -255,42 +304,27 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                                     >
                                         <option value="CYLINDER">Cylinder</option>
                                         <option value="SQUARE">Square</option>
-                                        <option value="PROFILE">Profile (Contour)</option>
                                     </select>
                                 </div>
-                                
-                                {configArray[selectedIdx].support.type === 'PROFILE' ? (
+                                <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <div className="flex justify-between items-baseline mb-1">
-                                            <label className="text-[9px] uppercase text-gray-500">Slice Height (Y)</label>
-                                            <span className="text-[9px] text-gray-400 italic">Extrudes down to base</span>
-                                        </div>
-                                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                                            value={configArray[selectedIdx].support.sliceHeight ?? 4}
-                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, sliceHeight: Number(e.target.value) } }))}
+                                        <label className="text-[9px] uppercase text-gray-500">Height</label>
+                                        <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                            value={configArray[selectedIdx].support.height}
+                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, height: Number(e.target.value) } }))}
                                         />
                                     </div>
-                                ) : (
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="text-[9px] uppercase text-gray-500">Height</label>
-                                            <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                                                value={configArray[selectedIdx].support.height}
-                                                onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, height: Number(e.target.value) } }))}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="text-[9px] uppercase text-gray-500">Radius / Size</label>
-                                            <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                                                value={configArray[selectedIdx].support.width}
-                                                onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, width: Number(e.target.value) } }))}
-                                            />
-                                        </div>
+                                    <div>
+                                        <label className="text-[9px] uppercase text-gray-500">Radius</label>
+                                        <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                            value={configArray[selectedIdx].support.width}
+                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, width: Number(e.target.value) } }))}
+                                        />
                                     </div>
-                                )}
+                                </div>
                             </div>
                         )}
-                    </div>
+                    </Accordion>
                 </div>
             )}
             

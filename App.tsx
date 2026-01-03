@@ -42,6 +42,9 @@ const App: React.FC = () => {
                         char1: t1Chars[i] || '',
                         char2: t2Chars[i] || '',
                         isOverridden: false,
+                        // Defaults for new fields
+                        char1Width: 1,
+                        char2Width: 1,
                         transform: { scaleX: 1, scaleY: 1, moveX: 0, moveZ: 0 },
                         support: { 
                             enabled: prev.supportEnabled, 
