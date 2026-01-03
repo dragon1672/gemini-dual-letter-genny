@@ -1,5 +1,5 @@
 export type BaseType = 'RECTANGLE' | 'OVAL';
-export type SupportType = 'CYLINDER' | 'SQUARE';
+export type SupportType = 'CYLINDER' | 'SQUARE' | 'PROFILE';
 
 export interface TransformSettings {
   scaleX: number;
@@ -12,7 +12,8 @@ export interface IndividualSupportSettings {
   enabled: boolean;
   type: SupportType;
   height: number;
-  width: number; 
+  width: number;
+  sliceHeight?: number;
 }
 
 export interface BridgeSettings {

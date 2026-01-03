@@ -255,24 +255,39 @@ const AdvancedControls: React.FC<AdvancedControlsProps> = ({ settings, setSettin
                                     >
                                         <option value="CYLINDER">Cylinder</option>
                                         <option value="SQUARE">Square</option>
+                                        <option value="PROFILE">Profile (Contour)</option>
                                     </select>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
+                                
+                                {configArray[selectedIdx].support.type === 'PROFILE' ? (
                                     <div>
-                                        <label className="text-[9px] uppercase text-gray-500">Height</label>
-                                        <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                                            value={configArray[selectedIdx].support.height}
-                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, height: Number(e.target.value) } }))}
+                                        <div className="flex justify-between items-baseline mb-1">
+                                            <label className="text-[9px] uppercase text-gray-500">Slice Height (Y)</label>
+                                            <span className="text-[9px] text-gray-400 italic">Extrudes down to base</span>
+                                        </div>
+                                        <input type="number" step="0.1" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                            value={configArray[selectedIdx].support.sliceHeight ?? 4}
+                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, sliceHeight: Number(e.target.value) } }))}
                                         />
                                     </div>
-                                    <div>
-                                        <label className="text-[9px] uppercase text-gray-500">Radius / Size</label>
-                                        <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
-                                            value={configArray[selectedIdx].support.width}
-                                            onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, width: Number(e.target.value) } }))}
-                                        />
+                                ) : (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Height</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                                value={configArray[selectedIdx].support.height}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, height: Number(e.target.value) } }))}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] uppercase text-gray-500">Radius / Size</label>
+                                            <input type="number" step="0.5" className="w-full bg-gray-800 text-xs p-1.5 rounded border border-gray-600 text-white"
+                                                value={configArray[selectedIdx].support.width}
+                                                onChange={(e) => updateConfig(selectedIdx, c => ({ support: { ...c.support, width: Number(e.target.value) } }))}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </div>
                         )}
                     </div>

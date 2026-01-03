@@ -339,18 +339,15 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
              parts.push(finalPos);
 
              // --- Manual Connector Bridge ---
-             // Only if enabled AND auto is false
              if (config.bridge && config.bridge.enabled && !config.bridge.auto) {
                  try {
                      const { width: bw, height: bh, depth: bd, moveX: bx, moveY: by, moveZ: bz, rotationZ } = config.bridge;
                      let bridge = m.Manifold.cube([bw, bh, bd], true);
-                     
                      if (rotationZ !== 0) {
                          const rotated = bridge.rotate([0, 0, rotationZ]);
                          bridge.delete();
                          bridge = rotated;
                      }
-
                      const positionedBridge = bridge.translate([centerX + dX + bx, by, dZ + bz]);
                      parts.push(positionedBridge);
                      bridge.delete();
@@ -362,17 +359,55 @@ export const generateDualTextGeometry = async (settings: TextSettings): Promise<
              // --- Supports ---
              const supp = config.support;
              if (supp && supp.enabled) {
-                 const h = supp.height;
-                 const w = supp.width;
-                 const supportGeom = createSupportPrimitive(m, supp.type, h, w);
-                 if (supportGeom) {
-                     const rotated = supportGeom.rotate([-90, 0, 0]);
-                     const baseBottomY = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
-                     const shiftY = baseBottomY + (h / 2);
-                     const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
-                     parts.push(positioned);
-                     if (supportGeom !== rotated) supportGeom.delete();
-                     if (rotated !== positioned) rotated.delete();
+                 if (supp.type === 'PROFILE') {
+                     // PROFILE Support Logic: Slice at Y, extrude down to base
+                     const sliceH = supp.sliceHeight ?? 4; 
+                     const baseBottomRel = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
+                     const extrudeLen = sliceH - baseBottomRel;
+
+                     if (extrudeLen > 0) {
+                         try {
+                            // Rotate Y->Z to slice with default plane
+                            const oriented = transformed.rotate([90, 0, 0]); 
+                            const cs = oriented.slice(sliceH);
+                            
+                            // Extrude along Z [0, extrudeLen]
+                            const pillar = m.Manifold.extrude(cs, extrudeLen, 0, 0, 1.0, 1.0);
+                            
+                            // Position Z top at sliceH: translate Z by (baseBottomRel)
+                            const shiftedPillar = pillar.translate([0, 0, baseBottomRel]);
+                            
+                            // Rotate back Z->Y
+                            const finalPillar = shiftedPillar.rotate([-90, 0, 0]);
+                            
+                            // Apply final scene translation
+                            const positioned = finalPillar.translate([centerX + dX, 0, dZ]);
+                            
+                            parts.push(positioned);
+                            
+                            oriented.delete();
+                            cs.delete();
+                            pillar.delete();
+                            shiftedPillar.delete();
+                            finalPillar.delete();
+                         } catch (e) {
+                             console.warn("Profile support generation failed", e);
+                         }
+                     }
+                 } else {
+                     // Standard Primitive Supports
+                     const h = supp.height;
+                     const w = supp.width;
+                     const supportGeom = createSupportPrimitive(m, supp.type, h, w);
+                     if (supportGeom) {
+                         const rotated = supportGeom.rotate([-90, 0, 0]);
+                         const baseBottomY = (baseHeight > 0) ? (embedDepth - baseHeight) : 0;
+                         const shiftY = baseBottomY + (h / 2);
+                         const positioned = rotated.translate([centerX + dX, shiftY, dZ]);
+                         parts.push(positioned);
+                         if (supportGeom !== rotated) supportGeom.delete();
+                         if (rotated !== positioned) rotated.delete();
+                     }
                  }
              }
              
