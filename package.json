@@ -5,9 +5,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "start": "vite start",
     "build": "vite build",
-    "preview": "vite preview"
+    "test": "vite test",
+    "eject": "vite eject",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@react-three/drei": "9.102.6",
@@ -19,18 +22,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-react": "^5.1.2",
     "gh-pages": "^6.3.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
-  },
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d build"
+    "vite": "^6.4.1"
   }
-
 }
