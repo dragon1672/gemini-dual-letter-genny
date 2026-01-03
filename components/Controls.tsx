@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TextSettings, FontLibrary, SupportType } from '../types';
 import { VirtualFontSelector } from './VirtualFontSelector';
 
@@ -55,6 +55,17 @@ const Controls: React.FC<ControlsProps> = ({
   // Combine text for preview
   const previewText = `${settings.text1} ${settings.text2}`.trim() || "Preview";
 
+  // Determine available variants for the selected font
+  const currentVariants = useMemo(() => {
+      if (!settings.fontUrl) return [];
+      for (const variants of Object.values(fontLibrary)) {
+          if (variants.some(v => v.url === settings.fontUrl)) {
+              return variants;
+          }
+      }
+      return [];
+  }, [settings.fontUrl, fontLibrary]);
+
   return (
     <div className="w-full md:w-80 bg-gray-800 p-4 flex flex-col gap-4 overflow-y-auto h-full border-r border-gray-700 shadow-xl z-20 custom-scrollbar shrink-0">
       <div>
@@ -105,14 +116,34 @@ const Controls: React.FC<ControlsProps> = ({
       </div>
 
       <Accordion title="Typography" defaultOpen={true}>
-          <div>
-            <span className="text-[10px] text-gray-500 uppercase block mb-1">Global Font</span>
-            <VirtualFontSelector 
-                fontLibrary={fontLibrary}
-                currentUrl={settings.fontUrl}
-                onSelect={(url) => handleChange('fontUrl', url)}
-                previewText={previewText}
-            />
+          <div className="space-y-3">
+            <div>
+                <span className="text-[10px] text-gray-500 uppercase block mb-1">Global Font</span>
+                <VirtualFontSelector 
+                    fontLibrary={fontLibrary}
+                    currentUrl={settings.fontUrl}
+                    onSelect={(url) => handleChange('fontUrl', url)}
+                    previewText={previewText}
+                />
+            </div>
+            
+            {currentVariants.length > 1 && (
+                <div className="animate-fade-in">
+                    <label className="text-[10px] text-gray-500 uppercase block mb-1">Weight / Style</label>
+                    <div className="relative">
+                        <select 
+                            className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs text-white appearance-none focus:border-blue-500 outline-none cursor-pointer"
+                            value={settings.fontUrl}
+                            onChange={(e) => handleChange('fontUrl', e.target.value)}
+                        >
+                            {currentVariants.map((v) => (
+                                <option key={v.url} value={v.url}>{v.name}</option>
+                            ))}
+                        </select>
+                        <i className="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-[10px] pointer-events-none"></i>
+                    </div>
+                </div>
+            )}
           </div>
       </Accordion>
 
